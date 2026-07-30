@@ -6,8 +6,20 @@ const STORAGE_KEYS = {
   gemini: "site_analysis_gemini_key",
 };
 
+const MODEL_KEYS = {
+  claude: "site_analysis_claude_model",
+  gemini: "site_analysis_gemini_model",
+};
+
+// Sensible current defaults (editable in Settings if the provider renames them)
+const DEFAULT_MODELS = {
+  claude: "claude-sonnet-4-6",
+  gemini: "gemini-flash-latest",
+};
+
 export function useApiKeys() {
   const [keys, setKeys] = useState({ claude: "", gemini: "" });
+  const [models, setModels] = useState({ ...DEFAULT_MODELS });
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -15,6 +27,10 @@ export function useApiKeys() {
       setKeys({
         claude: localStorage.getItem(STORAGE_KEYS.claude) || "",
         gemini: localStorage.getItem(STORAGE_KEYS.gemini) || "",
+      });
+      setModels({
+        claude: localStorage.getItem(MODEL_KEYS.claude) || DEFAULT_MODELS.claude,
+        gemini: localStorage.getItem(MODEL_KEYS.gemini) || DEFAULT_MODELS.gemini,
       });
     } catch {
       // localStorage blocked (private mode, etc.)
@@ -32,21 +48,34 @@ export function useApiKeys() {
     }
   };
 
+  const saveModel = (provider, value) => {
+    const v = value || DEFAULT_MODELS[provider];
+    setModels((prev) => ({ ...prev, [provider]: v }));
+    try {
+      localStorage.setItem(MODEL_KEYS[provider], v);
+    } catch {
+      // ignore
+    }
+  };
+
   const clearAll = () => {
     setKeys({ claude: "", gemini: "" });
+    setModels({ ...DEFAULT_MODELS });
     try {
       Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
+      Object.values(MODEL_KEYS).forEach((k) => localStorage.removeItem(k));
     } catch {
       // ignore
     }
   };
 
   const getActiveKey = (provider) => keys[provider] || "";
+  const getActiveModel = (provider) => models[provider] || DEFAULT_MODELS[provider];
 
-  return { keys, loaded, saveKey, clearAll, getActiveKey };
+  return { keys, models, loaded, saveKey, saveModel, clearAll, getActiveKey, getActiveModel };
 }
 
-export default function SettingsPanel({ keys, saveKey, clearAll, onClose }) {
+export default function SettingsPanel({ keys, models, saveKey, saveModel, clearAll, onClose }) {
   const [showClaude, setShowClaude] = useState(false);
   const [showGemini, setShowGemini] = useState(false);
   const [cleared, setCleared] = useState(false);
@@ -122,7 +151,7 @@ export default function SettingsPanel({ keys, saveKey, clearAll, onClose }) {
           </div>
           <p className="text-[10px] text-brand-text/60">
             Get yours at{" "}
-            <a
+            
               href="https://console.anthropic.com/settings/keys"
               target="_blank"
               rel="noopener noreferrer"
@@ -132,6 +161,17 @@ export default function SettingsPanel({ keys, saveKey, clearAll, onClose }) {
             </a>
             . Claude Sonnet 4 is recommended (good balance of capability and free-tier limits).
           </p>
+          <div className="mt-2">
+            <label className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Claude model name</label>
+            <input
+              type="text"
+              value={models?.claude || ""}
+              onChange={(e) => saveModel("claude", e.target.value)}
+              placeholder="claude-sonnet-4-6"
+              className="input font-mono text-xs mt-1"
+            />
+            <p className="text-[10px] text-brand-text/60 mt-1">Edit this if Anthropic renames the model. Leave as-is unless you get a "model not found" error.</p>
+          </div>
         </div>
 
         {/* Gemini Key */}
@@ -156,7 +196,7 @@ export default function SettingsPanel({ keys, saveKey, clearAll, onClose }) {
           </div>
           <p className="text-[10px] text-brand-text/60">
             Get yours at{" "}
-            <a
+            
               href="https://aistudio.google.com/app/apikey"
               target="_blank"
               rel="noopener noreferrer"
@@ -164,8 +204,19 @@ export default function SettingsPanel({ keys, saveKey, clearAll, onClose }) {
             >
               Google AI Studio
             </a>
-            . Gemini 2.5 Flash is free-tier friendly with generous limits.
+            . Use a current free-tier Flash model name below.
           </p>
+          <div className="mt-2">
+            <label className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Gemini model name</label>
+            <input
+              type="text"
+              value={models?.gemini || ""}
+              onChange={(e) => saveModel("gemini", e.target.value)}
+              placeholder="gemini-flash-latest"
+              className="input font-mono text-xs mt-1"
+            />
+            <p className="text-[10px] text-brand-text/60 mt-1">Google renames free models often. If you get a "model no longer available" error, check the current free model name at aistudio.google.com and type it here. "gemini-flash-latest" usually points to the current Flash model.</p>
+          </div>
         </div>
 
         {/* Actions */}
