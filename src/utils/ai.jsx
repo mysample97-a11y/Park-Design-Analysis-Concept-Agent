@@ -1,14 +1,13 @@
 // src/utils/ai.jsx - API Router (Claude + Gemini, browser BYOK)
-// FIXES vs previous version:
-//  1. callGemini now reads the SUCCESS body correctly (old code parsed the error-body variable -> always empty).
-//  2. callClaude uses the CORRECT browser CORS header: "anthropic-dangerous-direct-browser-access" (old "dangerously-allow-browser" is ignored by Anthropic -> every call CORS-blocked).
-//  3. callAI now reads `content` (what the analyzers actually send) AND `prompt`, and honors `maxTokens`, `useWebSearch`, and `pdfBase64`.
 
 function resolveGeminiModel(modelName) {
-  if (!modelName || typeof modelName !== "string") return "gemini-2.5-flash";
-  let clean = modelName.trim().replace(/^models\//, "");
-  if (clean.includes("1.5") || clean === "flash") return "gemini-2.5-flash";
-  return clean || "gemini-2.5-flash";
+  // Respect whatever the user typed in Settings. Only substitute a default
+  // when nothing usable was provided. "gemini-flash-latest" tracks Google's
+  // current free Flash model without needing a code change on rename.
+  const fallback = "gemini-flash-latest";
+  if (!modelName || typeof modelName !== "string") return fallback;
+  const clean = modelName.trim().replace(/^models\//, "");
+  return clean || fallback;
 }
 
 export function parseGeminiResponse(data) {
@@ -124,14 +123,23 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
 }
 
 // ---------- Universal wrapper ----------
-// Accepts a single options object. Reads BOTH `content` and `prompt` so it works
-// with every analyzer regardless of which field name they used.
+function storedModel(provider) {
+  try {
+    if (provider.includes("claude") || provider.includes("anthropic")) {
+      return localStorage.getItem("site_analysis_claude_model") || "";
+    }
+    return localStorage.getItem("site_analysis_gemini_model") || "";
+  } catch {
+    return "";
+  }
+}
+
 export async function callAI(opts = {}) {
   const provider = String(opts.provider || opts.apiProvider || "gemini").toLowerCase();
   const apiKey = opts.apiKey || opts.key || "";
   const content = opts.content || opts.prompt || opts.userPrompt || "";
   const systemInstruction = opts.systemInstruction || opts.systemPrompt || opts.system || "";
-  const model = opts.model || "";
+  const model = opts.model || storedModel(provider) || "";
   const maxTokens = opts.maxTokens || opts.max_tokens || 2048;
   const imageData = opts.imageData || opts.image || opts.fileData || null;
   const useWebSearch = opts.useWebSearch || false;
