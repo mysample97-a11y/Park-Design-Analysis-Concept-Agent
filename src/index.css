@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-brand-cream text-brand-dark font-sans antialiased;
+  }
+}
+
+@layer components {
+  .btn-gold {
+    @apply bg-brand-gold text-brand-dark font-bold px-4 py-3 rounded-md flex items-center justify-center gap-2 shadow-md hover:brightness-105 active:scale-[0.98] transition-all disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-dark {
+    @apply bg-brand-dark text-white font-bold px-4 py-2.5 rounded-md flex items-center gap-2 shadow-md hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-outline {
+    @apply text-xs font-medium border border-[#DDD6C9] px-3 py-2 rounded-md flex items-center gap-1 hover:border-brand-gold transition-colors;
+  }
+  .card {
+    @apply bg-white rounded-lg border-2 border-brand-border overflow-hidden;
+  }
+  .card-header {
+    @apply px-4 py-3 border-b border-brand-border bg-[#FBF7EE] font-bold text-sm uppercase tracking-wide;
+  }
+  .input {
+    @apply w-full text-sm bg-[#F7F5F1] border-2 border-brand-border rounded-md p-2.5 focus:border-brand-gold outline-none transition-colors;
+  }
+  .textarea {
+    @apply w-full text-sm bg-[#F7F5F1] border-2 border-brand-border rounded-md p-3 focus:border-brand-gold outline-none resize-y transition-colors;
+  }
+}

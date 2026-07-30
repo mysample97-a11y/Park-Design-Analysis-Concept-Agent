@@ -1,0 +1,346 @@
+import { useState } from "react";
+import { Sparkles, BarChart3, AlertTriangle, Info, Upload, Image as ImageIcon, ChevronDown, ChevronRight } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useAppContext } from "../App";
+import { callAI } from "../utils/ai";
+import { friendlyError, extractJSON, fileToBase64 } from "../utils/helpers";
+import ExportButtons from "../components/ExportButtons";
+
+const COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B", "#8A6A3A", "#5A5445", "#7FBF9E", "#E08A6A"];
+
+function detectDelimiter(line) {
+  const commaCount = (line.match(/,/g) || []).length;
+  const tabCount = (line.match(/\t/g) || []).length;
+  return tabCount > commaCount ? "\t" : ",";
+}
+
+function parseTable(raw) {
+  const text = raw.replace(/\r\n/g, "\n").trim();
+  if (!text) return null;
+  const delim = detectDelimiter(text.split("\n")[0] || "");
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === '"') {
+      if (inQuotes && next === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === delim && !inQuotes) {
+      row.push(cur.trim()); cur = "";
+    } else if (ch === "\n" && !inQuotes) {
+      row.push(cur.trim()); rows.push(row); row = []; cur = "";
+    } else { cur += ch; }
+  }
+  if (cur.length > 0 || row.length > 0) { row.push(cur.trim()); rows.push(row); }
+  const nonEmptyRows = rows.filter((r) => r.some((c) => c.length > 0));
+  if (nonEmptyRows.length < 2) return null;
+  return { headers: nonEmptyRows[0], rows: nonEmptyRows.slice(1) };
+}
+
+function classifyColumn(values) {
+  const nonEmpty = values.filter((v) => v && v.trim().length > 0);
+  const distinct = [...new Set(nonEmpty)];
+  const isNumericRating = nonEmpty.every((v) => /^[1-5]$/.test(v.trim()));
+  if (isNumericRating) return "rating";
+  if (distinct.length > 0 && distinct.length <= 8 && distinct.length < nonEmpty.length * 0.6) return "choice";
+  return "text";
+}
+
+function tabulateColumn(type, values) {
+  const nonEmpty = values.filter((v) => v && v.trim().length > 0);
+  if (type === "rating") {
+    const counts = { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 };
+    nonEmpty.forEach((v) => { if (counts[v] !== undefined) counts[v] += 1; });
+    return Object.entries(counts).map(([name, value]) => ({ name: `${name} star`, value }));
+  }
+  if (type === "choice") {
+    const counts = {};
+    nonEmpty.forEach((v) => { counts[v] = (counts[v] || 0) + 1; });
+    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }
+  return nonEmpty;
+}
+
+export default function SurveyAnalyzer() {
+  const { provider, apiKey } = useAppContext();
+
+  const [raw, setRaw] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const [parseError, setParseError] = useState("");
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+
+  function handleParse() {
+    setParseError(""); setAnalysis(null);
+    const table = parseTable(raw);
+    if (!table) {
+      setParseError("Couldn't find at least one header row and one response row. Paste or upload the exported table with headers on the first line.");
+      setParsed(null);
+      return;
+    }
+    const columns = table.headers.map((h, i) => {
+      const values = table.rows.map((r) => r[i] || "");
+      const type = classifyColumn(values);
+      return { header: h, type, values, data: tabulateColumn(type, values) };
+    });
+    setParsed({ responseCount: table.rows.length, columns, rawHeaders: table.headers, rawRows: table.rows });
+  }
+
+  function handleFileUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setParseError("");
+    const reader = new FileReader();
+    reader.onload = (evt) => setRaw(evt.target.result);
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  async function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageLoading(true); setParseError("");
+    try {
+      const base64 = await fileToBase64(file);
+      const text = await callAI({
+        provider, apiKey, maxTokens: 2000,
+        content: [
+          { type: "image", source: { type: "base64", media_type: file.type || "image/png", data: base64 } },
+          { type: "text", text: "This image shows survey results. Extract it into clean CSV format: first row = question headers, each following row = one respondent's answers. Respond with ONLY the CSV text, no markdown code fences, no explanation." },
+        ],
+      });
+      let cleaned = text.replace(/^```csv\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+      setRaw(cleaned);
+    } catch (err) {
+      setParseError(friendlyError(err.message) + " (Technical: " + err.message + ")");
+    } finally {
+      setImageLoading(false); e.target.value = "";
+    }
+  }
+
+  async function generateAnalysis() {
+    if (!parsed) return;
+    setAnalysisLoading(true); setAnalysis(null); setAnalysisError("");
+    const textColumns = parsed.columns.filter((c) => c.type === "text");
+    const structuredColumns = parsed.columns.filter((c) => c.type !== "text");
+    const payload = {
+      total_responses: parsed.responseCount,
+      structured_questions: structuredColumns.map((c) => ({ question: c.header, type: c.type, tabulated: c.data })),
+      free_text_questions: textColumns.map((c) => ({ question: c.header, responses: c.values.filter((v) => v.trim()) })),
+    };
+    try {
+      const text = await callAI({
+        provider, apiKey, maxTokens: 3500,
+        content: "You are analyzing Al Safa 2 Park community survey data (Dubai AI Park competition, User & Community Analysis deliverable). " +
+          "For EACH free-text question given, cluster responses into 3-6 short thematic categories, count each theme, and write ONE brief recommendation per theme (max one sentence each). " +
+          "Review structured (choice/rating) data for red flags (contradictions, very low counts, small sample under 20) and write a 2-3 sentence overall summary. " +
+          "Finally, write a short 'conclusion' field: 2-3 sentences giving the single clearest takeaway and the most important design action to take from this survey. " +
+          "Do not invent data not present. Respond with ONLY valid JSON, no markdown fences, no prose outside JSON: " +
+          '{"text_theme_analysis": {"<question>": [{"theme": "", "count": 0, "recommendation": ""}]}, "red_flags": [""], "overall_summary": "", "conclusion": ""}' +
+          "\n\nDATA:\n" + JSON.stringify(payload, null, 2),
+      });
+      setAnalysis(extractJSON(text));
+    } catch (e) {
+      setAnalysisError(e.message || "Unknown error while generating insight.");
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }
+
+  function buildPlainText() {
+    let lines = [`AL SAFA 2 - COMMUNITY SURVEY REPORT`, `Generated: ${new Date().toLocaleString()}`, `Total responses: ${parsed.responseCount}`, ""];
+    parsed.columns.filter((c) => c.type !== "text").forEach((c) => {
+      lines.push(c.header.toUpperCase());
+      c.data.forEach((d) => lines.push(`  ${d.name}: ${d.value}`));
+      lines.push("");
+    });
+    if (analysis) {
+      Object.entries(analysis.text_theme_analysis || {}).forEach(([q, themes]) => {
+        lines.push(`${q.toUpperCase()} - THEMES`);
+        themes.forEach((t) => lines.push(`  ${t.theme} (${t.count}): ${t.recommendation}`));
+        lines.push("");
+      });
+      if (analysis.red_flags?.length) { lines.push("RED FLAGS"); analysis.red_flags.forEach((f) => lines.push(`  - ${f}`)); lines.push(""); }
+      lines.push("OVERALL SUMMARY", analysis.overall_summary || "", "");
+      lines.push("CONCLUSION", analysis.conclusion || "");
+    }
+    lines.push("", "RAW RESPONSE DATA");
+    lines.push(parsed.rawHeaders.join(" | "));
+    parsed.rawRows.forEach((r) => lines.push(r.join(" | ")));
+    return lines.join("\n");
+  }
+
+  function exportWord() {
+    if (!parsed) return;
+    const rtfBody = buildPlainText().replace(/\\/g, "\\\\").replace(/\n/g, "\\par ");
+    const blob = new Blob([`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}\\f0\\fs22 ${rtfBody}}`], { type: "application/rtf" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href = url; a.download = "al-safa-2-survey-report.rtf";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  function exportPDF() {
+    if (!parsed) return;
+    const win = window.open("", "_blank");
+    if (!win) { setAnalysisError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again."); return; }
+
+    const barsHtml = (data, valueKey, nameKey, color) => {
+      const max = Math.max(1, ...data.map((d) => d[valueKey]));
+      return data.map((d) => `<div style="display:flex;align-items:center;margin-bottom:5px;"><div style="width:170px;font-size:11px;padding-right:8px;text-align:right;">${d[nameKey]}</div><div style="background:${color};height:14px;width:${Math.max(4, (d[valueKey] / max) * 220)}px;border-radius:2px;margin-right:6px;"></div><div style="font-size:11px;font-weight:600;">${d[valueKey]}</div></div>`).join("");
+    };
+
+    const structuredHtml = parsed.columns.filter((c) => c.type !== "text").map((c) => `<h2>${c.header}</h2>${barsHtml(c.data, "value", "name", "#1C2333")}`).join("");
+    const themeHtml = analysis ? Object.entries(analysis.text_theme_analysis || {}).map(([q, themes]) => `<h2>${q} (AI-clustered themes)</h2>${barsHtml(themes, "count", "theme", "#C9A46A")}<ul>${themes.map((t) => `<li><b>${t.theme}</b>: ${t.recommendation}</li>`).join("")}</ul>`).join("") : "";
+
+    const html = `<html><head><title>Al Safa 2 Survey Report</title><style>body{font-family:Arial,sans-serif;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;padding-bottom:4px;margin-top:24px;}table{border-collapse:collapse;width:100%;font-size:11px;margin-top:10px;}td,th{border:1px solid #ddd;padding:4px;}.conclusion{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;margin-top:20px;}</style></head><body>
+    <h1>Al Safa 2 - Community Survey Report</h1><p>Generated: ${new Date().toLocaleString()} | Total responses: ${parsed.responseCount}</p>
+    ${structuredHtml}
+    ${themeHtml}
+    ${analysis?.red_flags?.length ? `<h2>Red Flags</h2><ul>${analysis.red_flags.map((f) => `<li>${f}</li>`).join("")}</ul>` : ""}
+    ${analysis ? `<h2>Overall Summary</h2><p>${(analysis.overall_summary || "").replace(/\n/g, "<br/>")}</p>` : ""}
+    ${analysis?.conclusion ? `<div class="conclusion"><b>Conclusion:</b> ${analysis.conclusion}</div>` : ""}
+    <h2>Raw Response Data</h2><table><tr>${parsed.rawHeaders.map((h) => `<th>${h}</th>`).join("")}</tr>${parsed.rawRows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>
+    </body></html>`;
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 400);
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-[#FBF1E1] border border-[#E8D5B0] rounded-lg p-4 flex gap-3">
+        <Info size={18} className="text-brand-warning shrink-0 mt-0.5" />
+        <div className="text-sm text-brand-text">
+          <p className="font-medium mb-1">How to use this</p>
+          <p>Collect responses with Microsoft Forms or Google Forms ("anyone with the link" - no sign-in required). Then paste the data, upload the file directly, or upload a screenshot of the results below.</p>
+          <p className="mt-2 text-brand-warning font-medium">For reliable results: keep batches to around 50 responses per analysis run.</p>
+          <p className="mt-2 text-[10px] text-brand-text/60">Upload buttons may not work inside the Claude mobile app (a platform restriction). Try your phone's regular browser instead, or use paste, which always works.</p>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">Step 1 — Provide Your Survey Data</div>
+        <div className="p-4 space-y-4">
+          <textarea value={raw} onChange={(e) => setRaw(e.target.value)} placeholder={"Visit Frequency,Who With,Shade Importance,Priority Activity,What's Missing\nWeekly,Family with young children,5,Children's play,More shade"} rows={7} className="textarea font-mono text-xs" />
+          <button onClick={handleParse} disabled={!raw.trim()} className="btn-gold w-full">
+            <BarChart3 size={18} /> Tabulate Responses
+          </button>
+          {parseError && <p className="text-xs text-brand-danger flex items-center gap-1"><AlertTriangle size={12} /> {parseError}</p>}
+
+          <p className="text-xs text-brand-text/60 text-center pt-2 border-t border-[#F0EBDF]">- or, on desktop/browser -</p>
+          <div className="flex flex-wrap gap-3">
+            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
+              <Upload size={15} /> Upload CSV File
+              <input type="file" accept=".csv,.txt" onChange={handleFileUpload} className="sr-only" />
+            </label>
+            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff", opacity: imageLoading ? 0.4 : 1, pointerEvents: imageLoading ? "none" : "auto" }}>
+              <ImageIcon size={15} /> {imageLoading ? "Reading image..." : "Upload Image / Screenshot"}
+              <input type="file" accept="image/*" onChange={handleImageUpload} className="sr-only" />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {parsed && (
+        <>
+          <div className="bg-white rounded-lg border-2 border-brand-border p-4 flex items-center justify-between flex-wrap gap-3">
+            <p className="text-sm text-brand-text">
+              <span className="font-semibold">{parsed.responseCount}</span> response{parsed.responseCount !== 1 ? "s" : ""} parsed
+              {parsed.responseCount < 20 && <span className="text-brand-warning"> - small sample, treat patterns as indicative</span>}
+            </p>
+            <button onClick={generateAnalysis} disabled={analysisLoading || !apiKey} className="btn-dark">
+              <Sparkles size={15} /> {analysisLoading ? "Analyzing..." : "Generate AI Insight"}
+            </button>
+          </div>
+
+          {parsed.columns.filter((c) => c.type !== "text").map((c, i) => (
+            <div key={i} className="bg-white rounded-lg border border-brand-border p-4">
+              <h3 className="text-sm font-semibold mb-3">{c.header} <span className="text-[10px] font-normal text-brand-text/60 uppercase">({c.type})</span></h3>
+              <ResponsiveContainer width="100%" height={Math.max(120, c.data.length * 32)}>
+                <BarChart data={c.data} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D5" horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
+                  <Tooltip />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>{c.data.map((_, idx) => <Cell key={idx} fill={COLORS[idx % COLORS.length]} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ))}
+
+          {analysis && Object.entries(analysis.text_theme_analysis || {}).map(([q, themes], i) => (
+            <div key={i} className="bg-white rounded-lg border border-brand-border p-4">
+              <h3 className="text-sm font-semibold mb-3">{q} <span className="text-[10px] font-normal text-brand-text/60 uppercase">(AI-clustered themes)</span></h3>
+              <ResponsiveContainer width="100%" height={Math.max(120, themes.length * 32)}>
+                <BarChart data={themes} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D5" horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="theme" tick={{ fontSize: 11 }} width={140} />
+                  <Tooltip />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>{themes.map((_, idx) => <Cell key={idx} fill={COLORS[idx % COLORS.length]} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="mt-3 space-y-1.5">{themes.map((t, idx) => (<p key={idx} className="text-xs text-[#3A362C]"><span className="font-semibold">{t.theme}</span> ({t.count}): {t.recommendation}</p>))}</div>
+            </div>
+          ))}
+
+          <div className="bg-white rounded-lg border border-brand-border p-4">
+            <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-2">Overall Summary & Red Flags</h2>
+            {analysisLoading && <p className="text-sm text-brand-text/60">Reading responses and clustering themes...</p>}
+            {analysisError && (
+              <div className="space-y-1.5">
+                <p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(analysisError)}</p>
+                <p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical detail: {analysisError}</p>
+              </div>
+            )}
+            {analysis && (
+              <>
+                <p className="text-sm text-[#3A362C] leading-relaxed">{analysis.overall_summary}</p>
+                {analysis.red_flags?.length > 0 && (
+                  <div className="mt-3 space-y-1">{analysis.red_flags.map((f, i) => (<p key={i} className="text-xs text-brand-danger flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0" /> {f}</p>))}</div>
+                )}
+              </>
+            )}
+            {!analysis && !analysisLoading && !analysisError && <p className="text-sm text-brand-text/60">Click "Generate AI Insight" above for theme charts, per-theme recommendations, and any red flags.</p>}
+          </div>
+
+          {analysis?.conclusion && (
+            <div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
+              <h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2>
+              <p className="text-sm text-[#3A362C] leading-relaxed font-medium">{analysis.conclusion}</p>
+            </div>
+          )}
+
+          <div className="bg-white rounded-lg border border-brand-border">
+            <button onClick={() => setShowRaw((s) => !s)} className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold uppercase tracking-wide text-brand-text">
+              <span>Raw Response Data ({parsed.responseCount} rows)</span>
+              {showRaw ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {showRaw && (
+              <div className="px-4 pb-4 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-brand-text/60 border-b border-brand-border">{parsed.rawHeaders.map((h, i) => <th key={i} className="py-2 pr-3">{h}</th>)}</tr></thead>
+                  <tbody>{parsed.rawRows.map((r, i) => (<tr key={i} className="border-b border-[#F0EBDF]">{r.map((c, j) => <td key={j} className="py-2 pr-3">{c}</td>)}</tr>))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="p-4">
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h2>
+              <ExportButtons onExcel={() => {}} onWord={exportWord} onPDF={exportPDF} />
+              <p className="text-[10px] text-brand-text/60 mt-2">Word includes all data as tables (opens natively in Microsoft Word). PDF includes visual charts — your browser's print dialog opens; choose "Save as PDF."</p>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
