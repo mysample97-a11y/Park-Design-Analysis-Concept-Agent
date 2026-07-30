@@ -105,7 +105,7 @@ export default function SettingsPanel({ keys, models, saveKey, saveModel, clearA
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-3">
           <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
           <div className="text-xs text-red-800 space-y-1">
-            <p className="font-semibold">Security Notice — Read This</p>
+            <p className="font-semibold">Security Notice - Read This</p>
             <p>
               This is a static website (GitHub Pages). There is no backend server. Your API key
               is stored <strong>only in your browser</strong> using localStorage.
@@ -151,7 +151,7 @@ export default function SettingsPanel({ keys, models, saveKey, saveModel, clearA
           </div>
           <p className="text-[10px] text-brand-text/60">
             Get yours at{" "}
-            
+            <a
               href="https://console.anthropic.com/settings/keys"
               target="_blank"
               rel="noopener noreferrer"
@@ -196,7 +196,7 @@ export default function SettingsPanel({ keys, models, saveKey, saveModel, clearA
           </div>
           <p className="text-[10px] text-brand-text/60">
             Get yours at{" "}
-            
+            <a
               href="https://aistudio.google.com/app/apikey"
               target="_blank"
               rel="noopener noreferrer"
