@@ -32,17 +32,21 @@ export function useAppContext() {
 export default function App() {
   const [activeTab, setActiveTab] = useState("site");
   const [showSettings, setShowSettings] = useState(false);
-  const { keys, loaded, saveKey, clearAll, getActiveKey } = useApiKeys();
+  const { keys, models, loaded, saveKey, saveModel, clearAll, getActiveKey, getActiveModel } = useApiKeys();
 
   const [provider, setProvider] = useState("claude");
   const apiKey = getActiveKey(provider);
+  const model = getActiveModel(provider);
 
   const ctxValue = {
     provider,
     setProvider,
     apiKey,
+    model,
     keys,
+    models,
     saveKey,
+    saveModel,
     clearAll,
   };
 
@@ -77,7 +81,9 @@ export default function App() {
           <div className="max-w-6xl mx-auto px-6 pt-6">
             <SettingsPanel
               keys={keys}
+              models={models}
               saveKey={saveKey}
+              saveModel={saveModel}
               clearAll={clearAll}
               onClose={() => setShowSettings(false)}
             />
