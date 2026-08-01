@@ -3,8 +3,10 @@ import { Sparkles, AlertTriangle, Layers } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { useAppContext } from "../App";
+import ToolIntro from "../components/ToolIntro";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
 
 const POSITIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "Center"];
 const GRID_ORDER = ["NW", "N", "NE", "W", "Center", "E", "SW", "S", "SE"];
@@ -46,7 +48,7 @@ function BubbleDiagram({ zones }) {
 }
 
 export default function ConceptGenerator() {
-  const { provider, apiKey } = useAppContext();
+  const { provider, apiKey, meta } = useAppContext();
   const [brief, setBrief] = useState("");
   const [numConcepts, setNumConcepts] = useState(3);
   const [concepts, setConcepts] = useState(null);
@@ -61,7 +63,7 @@ export default function ConceptGenerator() {
     setLoading(true); setError(""); setConcepts(null); setRecommendation(null);
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 4000,
+        provider, apiKey, maxTokens: 6000,
         content:
           `You are a landscape architecture concept-design assistant. Given the site analysis findings and program brief below, generate ${numConcepts} DISTINCT zoning concept variants for a park redesign. Each concept should meaningfully differ in spatial organization, not just wording. ` +
           "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
@@ -106,6 +108,44 @@ export default function ConceptGenerator() {
     return lines.join("\n");
   }
 
+
+  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
+  const [overflowText, setOverflowText] = useState("");
+  function structuredOpts() {
+    return {
+      toolCode: "CPT",
+      meta,
+      inputRecord: [{label:"Brief supplied",value:(brief||"(none)").slice(0,400)},{label:"Concepts requested",value:String(numConcepts)}],
+      findings: [{ title: "Analysis output", text: buildReportText() }],
+      chartNote: (concepts && concepts.length)
+        ? `${concepts.length} bubble diagram(s) and a concept comparison table are reproduced in the PDF export of this report.`
+        : "No concepts generated, so no diagrams are included.",
+      chartsHtml: (concepts || []).length
+        ? tableHTML(["Concept", ...SCORE_CRITERIA.map((s) => s.label), "Overall"],
+            concepts.map((c) => [c.name, ...SCORE_CRITERIA.map((s) => c.scores?.[s.id] ?? ""), overallScore(c)]),
+            "Concept comparison")
+          + concepts.map((c) =>
+              `<div style="margin:14px 0;">${bubbleDiagramSVG(c.zones || [], c.name)}</div>`
+              + tableHTML(["Zone", "Position", "Area %", "Rationale"],
+                  (c.zones || []).map((z) => [z.name, z.position, z.area_pct, z.rationale]),
+                  `${c.name} - zone schedule`)
+            ).join("")
+        : "",
+      interpretation: recommendation?.recommendation || "",
+      conclusions: [recommendation?.tradeoffs].filter(Boolean),
+      runLimitations: [],
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (!overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "CPT",
+        reportText: buildReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
   function exportExcel() {
     if (!concepts) return;
     const wb = XLSX.utils.book_new();
@@ -120,21 +160,17 @@ export default function ConceptGenerator() {
     if (recommendation) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Recommendation", recommendation.recommendation], ["Tradeoffs", recommendation.tradeoffs]]), "Recommendation");
     downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "concept-generator-output.xlsx", "application/octet-stream");
   }
-  function exportWord() { downloadFile(buildRTF(buildReportText()), "concept-generator-output.rtf", "application/rtf"); }
+  function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
-    if (!concepts) return;
-    const html = `<html><head><title>Concept Generator Output</title><style>body{font-family:Arial;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;}table{border-collapse:collapse;width:100%;font-size:11px;margin-bottom:16px;}td,th{border:1px solid #ddd;padding:4px;}.note{background:#FBEAE7;border:1px solid #F0C8C0;padding:10px;border-radius:6px;font-size:12px;margin-bottom:20px;}.rec{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;margin-top:16px;}</style></head><body>
-    <h1>Concept Generator Output - MVP/Prototype</h1>
-    <div class="note"><b>Note:</b> AI-generated MVP prototype output, not a construction-grade deliverable. Zone placement is schematically reasoned by AI from the brief, not from precise survey geometry.</div>
-    <h2>Concept Comparison</h2><table><tr><th>Concept</th>${SCORE_CRITERIA.map((s) => `<th>${s.label}</th>`).join("")}<th>Overall</th></tr>${(concepts || []).map((c) => `<tr><td>${c.name}</td>${SCORE_CRITERIA.map((s) => `<td>${c.scores?.[s.id] ?? ""}</td>`).join("")}<td><b>${overallScore(c)}</b></td></tr>`).join("")}</table>
-    ${(concepts || []).map((c) => `<h2>${c.name}</h2><p><i>${c.vision}</i></p><table><tr><th>Zone</th><th>Position</th><th>Area %</th><th>Rationale</th></tr>${(c.zones || []).map((z) => `<tr><td>${z.name}</td><td>${z.position}</td><td>${z.area_pct}%</td><td>${z.rationale}</td></tr>`).join("")}</table>`).join("")}
-    ${recommendation ? `<div class="rec"><b>Recommendation:</b> ${recommendation.recommendation}<br/><b>Tradeoffs:</b> ${recommendation.tradeoffs}</div>` : ""}
-    </body></html>`;
-    printHTML(html, () => setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again."));
+    withOverflow((o) => exportStructuredPDF(o, () => {
+      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+    }));
   }
 
   return (
     <div className="space-y-6">
+      <ToolIntro toolCode="CPT" />
+
       <div>
         <h2 className="text-xl font-bold text-brand-dark flex items-center gap-2"><Layers size={20} className="text-brand-gold" /> Concept Generator</h2>
         <p className="text-sm text-brand-text mt-1">Paste your site findings and program brief - get 3-4 distinct, scored zoning concepts with schematic bubble diagrams.</p>

@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Sparkles, Leaf, Info, Mountain, AlertTriangle, ImageIcon, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
+import ToolIntro from "../components/ToolIntro";
 import { callAI } from "../utils/ai";
-import { friendlyError, extractJSON, extractJSONArray, fileToBase64 } from "../utils/helpers";
+import { friendlyError, extractJSON, fileToBase64 } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const MAX_IMAGES = 5;
 
-const PLANT_PALETTE = [
+const DEFAULT_PALETTE = [
   { id: "ghaf", name: "Ghaf (Prosopis cineraria)", type: "Canopy Tree", water: "Low", shade: "Full Sun", origin: "Native - UAE national tree" },
   { id: "sidr", name: "Sidr (Ziziphus spina-christi)", type: "Canopy Tree", water: "Low", shade: "Full Sun", origin: "Native" },
   { id: "samar", name: "Samar (Acacia tortilis)", type: "Canopy Tree", water: "Low", shade: "Full Sun", origin: "Native" },
@@ -24,7 +26,31 @@ const PLANT_PALETTE = [
 ];
 
 export default function VegetationAnalyzer() {
-  const { provider, apiKey } = useAppContext();
+  const { provider, apiKey, meta } = useAppContext();
+  const [location, setLocation] = useState("");
+  const [PLANT_PALETTE, setPalette] = useState(DEFAULT_PALETTE);
+  const [researching, setResearching] = useState(false);
+  const [researchNote, setResearchNote] = useState("");
+  const [researchError, setResearchError] = useState("");
+  const [terrainNote, setTerrainNote] = useState("");
+
+  async function researchPalette() {
+    if (!location.trim()) { setResearchError("Enter a project location first."); return; }
+    setResearching(true); setResearchError("");
+    try {
+      const text = await callAI({
+        provider, apiKey, maxTokens: 3000, useWebSearch: provider === "claude",
+        content: `For the location "${location}", give a reference planting palette of 10-14 species suitable for public landscape there, prioritising native and climate-adapted species. Respond with ONLY a JSON array, no markdown fences: [{"id":"short_id","name":"Common name (Botanical name)","type":"Canopy Tree|Palm|Shrub|Groundcover|Accent","water":"Low|Medium|High","shade":"Full Sun|Part Shade|Shade","origin":"Native|Adaptive|Introduced - note"}]. Use real species that genuinely grow in that climate. Do not invent species.`,
+      });
+      const parsed = extractJSON(text);
+      if (!Array.isArray(parsed) || !parsed.length) throw new Error("Unexpected format");
+      setPalette(parsed);
+      setResearchNote(`Palette researched for: ${location}`);
+    } catch (e) {
+      setResearchError(e.message || "Could not research this location. The default palette remains in use.");
+    } finally { setResearching(false); }
+  }
+
 
   const [waterFilter, setWaterFilter] = useState("all");
   const [siteContext, setSiteContext] = useState("");
@@ -74,7 +100,7 @@ export default function VegetationAnalyzer() {
       }
       contentBlocks.push({ type: "text", text: "These are site-visit photos from a park redesign project. Describe what vegetation/trees/plants are visible across all photos - species if identifiable, apparent condition, approximate count per photo. Write this as plain field notes (a few sentences per photo), the way a landscape architect would jot down observations. Do not describe anything other than vegetation." });
       const text = await callAI({
-        provider, apiKey, maxTokens: 1800,
+        provider, apiKey, maxTokens: 3000,
         content: contentBlocks,
       });
       if (!text) throw new Error("empty description");
@@ -90,8 +116,8 @@ export default function VegetationAnalyzer() {
   async function generateInsight() {
     setInsightLoading(true); setInsight(null); setInsightError("");
     const summary = {
-      site: "Al Safa 2 Park, Jumeirah, Dubai",
-      terrain_reference: "Approx. 2m above sea level; Dubai coastal terrain is characteristically flat (0-10m citywide). Significant natural slope unlikely, pending DWG confirmation. Source: cross-referenced elevation data, adjacent-confidence not survey-grade.",
+      site: location || meta?.siteDescription || meta?.projectName || "(location not stated)",
+      terrain_reference: terrainNote || "No survey-grade terrain data supplied. Terrain characteristics should be confirmed against site survey before reliance.",
       soil_reference: "No public dataset available for this site - unverified assumption until geotechnical data is sourced.",
       user_provided_site_context: siteContext || "None provided.",
       existing_vegetation_inventory: inventory || "Not structured yet.",
@@ -100,7 +126,7 @@ export default function VegetationAnalyzer() {
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 1500,
-        content: "You are a landscape architecture assistant giving planting and site-condition guidance for the Al Safa 2 Park redesign (Dubai). The 'general_reference_palette' is a pre-compiled list of Dubai-appropriate species (from Dubai Municipality's afforestation program and regional horticultural sources) - it is NOT specific to this site yet; your job is to reason about which of these actually fit THIS site given the terrain/soil reference and any user-provided site context or existing inventory. Do not invent species outside the reference list, and do not invent terrain/soil facts beyond what's given. Provide: " +
+        content: "You are a landscape architecture assistant giving planting and site-condition guidance for a park design at the stated location. The 'general_reference_palette' is a reference list of species appropriate to that region - it is NOT specific to this site yet; your job is to reason about which of these actually fit THIS site given the terrain/soil reference and any user-provided site context or existing inventory. Do not invent species outside the reference list, and do not invent terrain/soil facts beyond what's given. Provide: " +
           "(1) 'terrain_soil_note': 1-2 sentences on what the terrain/soil data means for planting choices and what to verify once real data arrives, " +
           "(2) 'inventory_guidance': 1-2 sentences on how any existing inventory should inform retain/remove decisions (or note if none was provided), " +
           "(3) 'suggested_species': an array of 3-5 objects {name, reason} - species FROM THE REFERENCE PALETTE ONLY, each with a one-line reason tied to this site's actual conditions, " +
@@ -116,7 +142,7 @@ export default function VegetationAnalyzer() {
   }
 
   function buildReportText() {
-    let lines = ["AL SAFA 2 - VEGETATION, TERRAIN & SOIL ANALYSIS", "", "TERRAIN: Approx. 2m above sea level; Dubai coastal terrain is flat. Confirm against real DWG.", "SOIL: No public dataset found - unverified assumption until geotechnical data is sourced.", "", "GENERAL REFERENCE PALETTE (Dubai-appropriate, not yet site-specific)"];
+    let lines = ["VEGETATION, TERRAIN & SOIL ANALYSIS", `Location: ${location || meta?.siteDescription || "(not stated)"}`, "", "TERRAIN: " + (terrainNote || "No survey data supplied - confirm against site survey."), "SOIL: No dataset supplied - unverified until geotechnical data is sourced.", "", "GENERAL REFERENCE PALETTE (regional, not yet site-specific)"];
     PLANT_PALETTE.forEach((p) => lines.push(`  ${p.name} - ${p.type}, water: ${p.water}, shade: ${p.shade}, origin: ${p.origin}`));
     if (inventory && inventory.length) { lines.push("", "EXISTING VEGETATION INVENTORY"); inventory.forEach((v) => lines.push(`  ${v.name} - count: ${v.estimated_count}, condition: ${v.condition} -> ${v.recommendation}. ${v.notes}`)); }
     if (insight) {
@@ -129,6 +155,33 @@ export default function VegetationAnalyzer() {
     return lines.join("\n");
   }
 
+
+  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
+  const [overflowText, setOverflowText] = useState("");
+  function structuredOpts() {
+    return {
+      toolCode: "VEG",
+      meta,
+      inputRecord: [{label:"Location",value:(typeof location!=="undefined"&&location)||"(not stated)"}],
+      findings: [{ title: "Analysis output", text: buildReportText() }],
+      chartNote: "Reference planting palette is reproduced in the PDF export.",
+      chartsHtml: tableHTML(["Species", "Type", "Water", "Shade", "Origin"],
+          PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin]), "Reference planting palette"),
+      interpretation: insight?.conclusion || "",
+      conclusions: (insight?.recommendations || []).map((r)=>typeof r==="string"?r:(r.recommendation||"")),
+      runLimitations: [],
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (!overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "VEG",
+        reportText: buildReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Species", "Type", "Water", "Shade", "Origin"], ...PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin])]), "Reference Palette");
@@ -146,38 +199,35 @@ export default function VegetationAnalyzer() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  function exportWord() {
-    const rtfBody = buildReportText().replace(/\\/g, "\\\\").replace(/\n/g, "\\par ");
-    const blob = new Blob([`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}\\f0\\fs22 ${rtfBody}}`], { type: "application/rtf" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "al-safa-2-vegetation-terrain-soil.rtf";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
   function exportPDF() {
-    const win = window.open("", "_blank");
-    if (!win) { setInsightError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again."); return; }
-    const html = `<html><head><title>Vegetation Analysis</title><style>body{font-family:Arial;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;}table{border-collapse:collapse;width:100%;font-size:11px;}td,th{border:1px solid #ddd;padding:4px;}.conclusion{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;margin-top:20px;}</style></head><body>
-    <h1>Al Safa 2 - Vegetation, Terrain & Soil</h1>
-    <h2>General Reference Palette</h2><table><tr><th>Species</th><th>Type</th><th>Water</th><th>Origin</th></tr>${PLANT_PALETTE.map((p) => `<tr><td>${p.name}</td><td>${p.type}</td><td>${p.water}</td><td>${p.origin}</td></tr>`).join("")}</table>
-    ${inventory && inventory.length ? `<h2>Existing Inventory</h2><ul>${inventory.map((v) => `<li>${v.name}: ${v.recommendation} - ${v.notes}</li>`).join("")}</ul>` : ""}
-    ${insight ? `<h2>Terrain/Soil Note</h2><p>${insight.terrain_soil_note || ""}</p><h2>Site-Specific Suggested Species</h2><ul>${(insight.suggested_species || []).map((s) => `<li><b>${s.name}</b>: ${s.reason}</li>`).join("")}</ul>` : ""}
-    ${insight?.conclusion ? `<div class="conclusion"><b>Conclusion:</b> ${insight.conclusion}</div>` : ""}
-    </body></html>`;
-    win.document.write(html); win.document.close();
-    setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 400);
+    withOverflow((o) => exportStructuredPDF(o, () => {
+      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+    }));
   }
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-brand-border p-4 flex gap-3">
-        <Mountain size={18} className="text-[#8A6A3A] shrink-0 mt-0.5" />
-        <div className="text-sm text-brand-text">
-          <p><span className="font-semibold">Terrain:</span> ~2m above sea level. Dubai coastal terrain is flat (0-10m citywide) - significant natural slope unlikely, pending real DWG confirmation.</p>
-          <p className="mt-1"><span className="font-semibold">Soil:</span> No public dataset found - unverified assumption until geotechnical data is sourced.</p>
+      <ToolIntro toolCode="VEG" />
+
+      <div className="card">
+        <div className="card-header">Project Location - Planting Palette</div>
+        <div className="p-4 space-y-2">
+          <input value={location} onChange={(e) => setLocation(e.target.value)}
+            placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai"
+            className="input" />
+          <button onClick={researchPalette} disabled={researching || !apiKey} className="btn-gold w-full">
+            {researching ? "Researching..." : "Research Planting Palette for This Location"}
+          </button>
+          <p className="text-[10px] text-brand-text/60">
+            Optional. Without this, the built-in reference data below is used - which was compiled for a hot-arid
+            Gulf climate and may not suit other regions. Researching replaces it with data for your location.
+          </p>
+          {researchNote && <p className="text-xs text-brand-success">{researchNote}</p>}
+          {researchError && <p className="text-xs text-brand-danger">{friendlyError(researchError)}</p>}
         </div>
       </div>
-
       <div className="card">
         <div className="card-header">
           <div>Step 1 — Give This Tool Site Context</div>
@@ -214,6 +264,14 @@ export default function VegetationAnalyzer() {
             </div>
           )}
           {inventory && inventory.length === 0 && <p className="text-xs text-brand-text/60">No existing vegetation was described in your notes - that's fine if this is general site context rather than a plant inventory.</p>}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-brand-border p-4 flex gap-3">
+        <Mountain size={18} className="text-[#8A6A3A] shrink-0 mt-0.5" />
+        <div className="text-sm text-brand-text">
+          <p><span className="font-semibold">Terrain:</span> ~2m above sea level. Dubai coastal terrain is flat (0-10m citywide) - significant natural slope unlikely, pending real DWG confirmation.</p>
+          <p className="mt-1"><span className="font-semibold">Soil:</span> No public dataset found - unverified assumption until geotechnical data is sourced.</p>
         </div>
       </div>
 

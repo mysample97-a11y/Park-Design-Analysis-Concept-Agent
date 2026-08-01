@@ -4,8 +4,10 @@ import * as XLSX from "xlsx";
 import * as mammoth from "mammoth";
 import { callAI } from "../utils/ai";
 import { useAppContext } from "../App";
+import ToolIntro from "../components/ToolIntro";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF, fileToBase64Raw, copyToClipboard } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, tableHTML } from "../utils/reportTemplate";
 
 const REG_DEFAULT = `Governing Standards: Dubai Universal Design Code (max ramp gradient 8%/1:12, min ramp width 1.0m, min crossing width 2.0m, max cross-fall 2%, max ramp run 10m, handrails above 0.5m level change); UAE Federal Law No. 29 of 2006 (Rights of People of Determination); Neighborhood Parks Manual (peak capacity 150-400 visitors/10,000sqm by density band, 15% leasable/commercial area target).
 Compliance method: every path/ramp/crossing checked programmatically against these standards, tagged Pass/Needs Review/Pending.
@@ -22,12 +24,12 @@ const SECTIONS = [
   { id: "climate", label: "2. Climatic Analysis", placeholder: "Paste the Solar + Wind tool conclusions...", default: "" },
   { id: "vegetation", label: "3. Vegetation, Terrain & Soil", placeholder: "Paste the Vegetation tool's conclusion...", default: "" },
   { id: "community", label: "4. User & Community Analysis", placeholder: "Paste the Survey Analyzer's conclusion + Parks Manual capacity/audience data...", default: "" },
-  { id: "regulatory", label: "5. Regulatory & Accessibility Framework", placeholder: "", default: REG_DEFAULT },
-  { id: "precedent", label: "6. Precedent Study Synthesis", placeholder: "", default: PRECEDENT_DEFAULT },
+  { id: "regulatory", label: "5. Regulatory & Accessibility Framework", placeholder: "Paste the regulatory standards and accessibility requirements that govern your project...", default: "", example: REG_DEFAULT },
+  { id: "precedent", label: "6. Precedent Study Synthesis", placeholder: "Paste your precedent study findings - comparable projects and what they demonstrate...", default: "", example: PRECEDENT_DEFAULT },
 ];
 
 export default function CombinedDocumentGenerator() {
-  const { provider, apiKey } = useAppContext();
+  const { provider, apiKey, meta } = useAppContext();
   const [inputs, setInputs] = useState(() => Object.fromEntries(SECTIONS.map((s) => [s.id, s.default])));
   const [fileLoading, setFileLoading] = useState({});
   const [fileErrors, setFileErrors] = useState({});
@@ -77,7 +79,7 @@ export default function CombinedDocumentGenerator() {
     const combined = SECTIONS.map((s) => `## ${s.label}\n${inputs[s.id] || "(not provided)"}`).join("\n\n");
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 3500,
+        provider, apiKey, maxTokens: 6000,
         content:
           "You are compiling a Site Analysis and Opportunities Assessment for a park redesign, from six input sections below. Produce: " +
           "(1) 'matrix': array of {theme, constraint, opportunity} - cross-reference findings across ALL sections into themed rows; each constraint AND opportunity must trace to something actually stated below, not invented, " +
@@ -111,6 +113,35 @@ export default function CombinedDocumentGenerator() {
     return lines.join("\n");
   }
 
+
+  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
+  const [overflowText, setOverflowText] = useState("");
+  function structuredOpts() {
+    return {
+      toolCode: "CMB",
+      meta,
+      inputRecord: SECTIONS.map((s)=>({label:s.label,value:(inputs[s.id]||"(not provided)").slice(0,200)})),
+      findings: [{ title: "Analysis output", text: buildFullReportText() }],
+      chartNote: result ? "Constraints and opportunities matrix is reproduced in the PDF export." : "No synthesis generated yet.",
+      chartsHtml: result
+        ? tableHTML(["Theme", "Constraint", "Opportunity"],
+            (result.matrix || []).map((m) => [m.theme, m.constraint, m.opportunity]), "Constraints and opportunities matrix")
+        : "",
+      interpretation: (result?.design_implications || []).join(" "),
+      conclusions: (result?.design_implications || []),
+      runLimitations: [],
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (!overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "CMB",
+        reportText: buildFullReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Section", "Content"], ...SECTIONS.map((s) => [s.label, inputs[s.id] || ""])]), "Sections 1-6");
@@ -121,21 +152,17 @@ export default function CombinedDocumentGenerator() {
     }
     downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "site-analysis-consolidated.xlsx", "application/octet-stream");
   }
-  function exportWord() { downloadFile(buildRTF(buildFullReportText()), "site-analysis-consolidated.rtf", "application/rtf"); }
+  function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
-    const html = `<html><head><title>Site Analysis and Opportunities Assessment</title><style>body{font-family:Arial;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;margin-top:20px;}table{border-collapse:collapse;width:100%;font-size:11px;margin-bottom:16px;}td,th{border:1px solid #ddd;padding:5px;}.brief{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;white-space:pre-wrap;font-size:12px;}.note{background:#FBEAE7;border:1px solid #F0C8C0;padding:10px;border-radius:6px;font-size:12px;}</style></head><body>
-    <h1>Site Analysis and Opportunities Assessment</h1>
-    <div class="note"><b>Note:</b> MVP/prototype compilation demonstrating AI-assisted synthesis workflow, not a construction-grade deliverable.</div>
-    ${SECTIONS.map((s) => `<h2>${s.label}</h2><p style="font-size:12px;white-space:pre-wrap;">${(inputs[s.id] || "(not provided)").replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>`).join("")}
-    ${result ? `<h2>7. Consolidated Constraints & Opportunities Matrix</h2><table><tr><th>Theme</th><th>Constraint</th><th>Opportunity</th></tr>${(result.matrix || []).map((m) => `<tr><td>${m.theme}</td><td>${m.constraint}</td><td>${m.opportunity}</td></tr>`).join("")}</table>` : ""}
-    ${result ? `<h2>8. Design Implications Summary</h2><ul>${(result.design_implications || []).map((d) => `<li>${d}</li>`).join("")}</ul>` : ""}
-    ${result?.concept_brief ? `<h2>Concept Generator Brief (ready to paste)</h2><div class="brief">${result.concept_brief.replace(/</g, "&lt;")}</div>` : ""}
-    </body></html>`;
-    printHTML(html, () => setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again."));
+    withOverflow((o) => exportStructuredPDF(o, () => {
+      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+    }));
   }
 
   return (
     <div className="space-y-6">
+      <ToolIntro toolCode="CMB" />
+
       <div>
         <h2 className="text-xl font-bold text-brand-dark flex items-center gap-2"><Layers size={20} className="text-brand-gold" /> Combined Document Generator</h2>
         <p className="text-sm text-brand-text mt-1">Paste or upload the outputs of your other tools - get a consolidated Constraints & Opportunities Matrix, Design Implications, and a ready-to-paste Concept Generator brief.</p>
@@ -143,7 +170,7 @@ export default function CombinedDocumentGenerator() {
 
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> Sections 5 & 6 are pre-filled with prepared content - review/edit before generating. Sections 1-4 need real content from your other tools. Each section accepts .txt, .docx, .rtf (all providers) or .pdf (Claude only).</p>
+        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts .txt, .docx, .rtf (all providers) or .pdf (Claude only).</p>
       </div>
 
       <div className="card">
@@ -153,10 +180,18 @@ export default function CombinedDocumentGenerator() {
             <div key={s.id}>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">{s.label}</label>
+                <span className="flex items-center gap-3">
+                {s.example && !inputs[s.id] && (
+                  <button onClick={() => updateInput(s.id, s.example)}
+                    className="text-[10px] font-medium text-brand-text/70 hover:underline">
+                    Load example
+                  </button>
+                )}
                 <label className="text-[10px] font-medium text-brand-gold flex items-center gap-1 cursor-pointer hover:underline">
                   <Upload size={11} /> {fileLoading[s.id] ? "Reading..." : "Upload file"}
                   <input type="file" accept=".txt,.docx,.rtf,.pdf" onChange={(e) => { handleSectionFile(s.id, e.target.files[0]); e.target.value = ""; }} className="sr-only" />
                 </label>
+                </span>
               </div>
               <textarea value={inputs[s.id]} onChange={(e) => updateInput(s.id, e.target.value)} placeholder={s.placeholder} rows={s.id === "regulatory" || s.id === "precedent" ? 5 : 3} className="textarea" />
               {fileErrors[s.id] && <p className="text-[10px] text-brand-danger mt-1 flex items-center gap-1"><AlertTriangle size={10} /> {friendlyError(fileErrors[s.id])}</p>}

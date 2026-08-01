@@ -32,7 +32,7 @@ export function useAppContext() {
 export default function App() {
   const [activeTab, setActiveTab] = useState("site");
   const [showSettings, setShowSettings] = useState(false);
-  const { keys, models, loaded, saveKey, saveModel, clearAll, getActiveKey, getActiveModel } = useApiKeys();
+  const { keys, models, meta, loaded, saveKey, saveModel, saveMeta, clearAll, getActiveKey, getActiveModel } = useApiKeys();
 
   const [provider, setProvider] = useState("claude");
   const apiKey = getActiveKey(provider);
@@ -45,8 +45,10 @@ export default function App() {
     model,
     keys,
     models,
+    meta,
     saveKey,
     saveModel,
+    saveMeta,
     clearAll,
   };
 
@@ -82,8 +84,10 @@ export default function App() {
             <SettingsPanel
               keys={keys}
               models={models}
+              meta={meta}
               saveKey={saveKey}
               saveModel={saveModel}
+              saveMeta={saveMeta}
               clearAll={clearAll}
               onClose={() => setShowSettings(false)}
             />

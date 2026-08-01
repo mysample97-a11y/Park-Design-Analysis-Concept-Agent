@@ -1,4 +1,8 @@
 // src/utils/ai.jsx - API Router (Claude + Gemini, browser BYOK)
+// FIXES vs previous version:
+//  1. callGemini now reads the SUCCESS body correctly (old code parsed the error-body variable -> always empty).
+//  2. callClaude uses the CORRECT browser CORS header: "anthropic-dangerous-direct-browser-access" (old "dangerously-allow-browser" is ignored by Anthropic -> every call CORS-blocked).
+//  3. callAI now reads `content` (what the analyzers actually send) AND `prompt`, and honors `maxTokens`, `useWebSearch`, and `pdfBase64`.
 
 function resolveGeminiModel(modelName) {
   // Respect whatever the user typed in Settings. Only substitute a default
@@ -123,6 +127,10 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
 }
 
 // ---------- Universal wrapper ----------
+// Accepts a single options object. Reads BOTH `content` and `prompt` so it works
+// with every analyzer regardless of which field name they used.
+// Reads the user-chosen model from localStorage as a fallback, so every tool
+// honors the Settings model field even without passing `model` explicitly.
 function storedModel(provider) {
   try {
     if (provider.includes("claude") || provider.includes("anthropic")) {

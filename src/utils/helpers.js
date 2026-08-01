@@ -29,28 +29,88 @@ export function friendlyError(err) {
   if (!msg) return "An unknown error occurred. Please try again.";
   if (msg.includes("no api key") || msg.includes("key is missing")) return "Add an API key in Settings before using AI features.";
   if (msg.includes("failed to fetch") || msg.includes("networkerror")) return "Network error - check your internet connection, or the AI provider may be temporarily unreachable.";
-  if (msg.includes("401") || msg.includes("403") || msg.includes("key invalid") || msg.includes("api key error")) return "API key problem - check your key is correct and has quota remaining in Settings.";
-  if (msg.includes("json") || msg.includes("unexpected token") || msg.includes("no json")) return "The AI's answer got cut off or wasn't in the expected format. Try again - it often works on retry, or reduce the amount of input.";
+  if (msg.includes("429") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted") || msg.includes("exhausted"))
+    return "Your API key has hit its usage limit or rate cap. Free tiers reset after a period - wait a few minutes and retry, or use a key with remaining quota.";
+  if (msg.includes("401") || msg.includes("403") || msg.includes("key invalid") || msg.includes("api key error")) return "API key problem - the key was rejected. Check it is correct and still active in Settings.";
+  if (msg.includes("overloaded") || msg.includes("503") || msg.includes("529")) return "The AI provider is temporarily overloaded. Wait a moment and retry.";
+  if (msg.includes("position") || msg.includes("after array element") || msg.includes("unterminated"))
+    return "The AI's answer was cut off before it finished (response length limit). Try again with fewer items, or shorten your input text.";
+  if (msg.includes("no json")) return "The AI replied but not in the expected format. This usually resolves on retry. If it repeats, shorten your input.";
+  if (msg.includes("json") || msg.includes("unexpected token")) return "The AI's answer could not be read as structured data. Try again - this usually succeeds on retry.";
   if (msg.includes("empty")) return "The AI didn't send back any content that time. Try again.";
   if (msg.includes("cors")) return "The AI provider blocked the browser request. If using Claude, this app needs its browser-access header; if using another provider, it may not support direct browser calls.";
   return typeof err === "string" ? err : err?.message || "Something went wrong. Try again.";
 }
 
 /** Robust JSON Extractor (handles markdown fences, objects, arrays) */
+/** Closes an unterminated JSON fragment from a truncated response.
+ *  Cuts only at COMPLETE element boundaries, so a partially-received value is
+ *  discarded rather than silently recovered with a wrong number, and closes
+ *  brackets using a stack so nesting order is correct. */
+function repairTruncatedJSON(fragment) {
+  const t = fragment.trim();
+
+  // Scan once, recording every index that ends a complete element, plus the
+  // bracket stack at that point.
+  const boundaries = [];
+  const stack = [];
+  let inStr = false, esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      stack.pop();
+      boundaries.push({ end: i + 1, stack: [...stack] });
+    }
+  }
+  // Try the latest complete boundary first, then walk backwards.
+  for (let k = boundaries.length - 1; k >= 0 && k >= boundaries.length - 40; k--) {
+    const { end, stack: open } = boundaries[k];
+    const base = t.slice(0, end).replace(/,\s*$/, "");
+    const closing = [...open].reverse().map((c) => (c === "{" ? "}" : "]")).join("");
+    try {
+      const parsed = JSON.parse(base + closing);
+      if (Array.isArray(parsed) && parsed.length === 0) continue;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Object.keys(parsed).length === 0) continue;
+      return parsed;
+    } catch { /* walk back further */ }
+  }
+  return null;
+}
+
+/** Robust JSON extractor. Handles markdown fences, surrounding prose, and truncated
+ *  responses. Preserves the OUTERMOST structure so an array is never downgraded to
+ *  an object (which would break Array.isArray checks in the tools). */
 export function extractJSON(text, fallback = null) {
   if (!text) return fallback;
   if (typeof text === "object") return text;
-  try { return JSON.parse(text); } catch (e) {}
+
+  try { return JSON.parse(text); } catch (e) { /* continue */ }
+
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (fence && fence[1]) { try { return JSON.parse(fence[1].trim()); } catch (err) {} }
-  const fb = text.indexOf("{"), lb = text.lastIndexOf("}");
-  const fbr = text.indexOf("["), lbr = text.lastIndexOf("]");
-  // Prefer whichever structure appears first
-  if (fbr !== -1 && (fb === -1 || fbr < fb) && lbr > fbr) { try { return JSON.parse(text.substring(fbr, lbr + 1)); } catch (err) {} }
-  if (fb !== -1 && lb > fb) { try { return JSON.parse(text.substring(fb, lb + 1)); } catch (err) {} }
-  if (fbr !== -1 && lbr > fbr) { try { return JSON.parse(text.substring(fbr, lbr + 1)); } catch (err) {} }
+  if (fence && fence[1]) {
+    try { return JSON.parse(fence[1].trim()); } catch (err) { text = fence[1]; }
+  }
+
+  const fb = text.indexOf("{"), fbr = text.indexOf("[");
+  const openers = [fb, fbr].filter((i) => i !== -1);
+  if (!openers.length) return fallback;
+  const firstOpen = Math.min(...openers);
+  const isArray = firstOpen === fbr;
+  const closer = isArray ? text.lastIndexOf("]") : text.lastIndexOf("}");
+
+  if (closer > firstOpen) {
+    try { return JSON.parse(text.substring(firstOpen, closer + 1)); } catch (err) { /* continue */ }
+  }
+  const repaired = repairTruncatedJSON(text.slice(firstOpen));
+  if (repaired !== null) return repaired;
   return fallback;
 }
+
 export const safeJSONParse = extractJSON;
 export const parseJSON = extractJSON;
 export const parseJson = extractJSON;

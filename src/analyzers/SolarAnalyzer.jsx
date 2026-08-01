@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Sparkles, Plus, Trash2, Sun, Info, AlertTriangle, Search } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from "recharts";
 import { useAppContext } from "../App";
+import ToolIntro from "../components/ToolIntro";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, barChartSVG, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -61,7 +63,7 @@ function buildDayData(month, day, lat, lon, utcOffset) {
 }
 
 export default function SolarAnalyzer() {
-  const { provider, apiKey } = useAppContext();
+  const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
   const [siteInfo, setSiteInfo] = useState(null);
   const [siteLoading, setSiteLoading] = useState(false);
@@ -111,7 +113,7 @@ export default function SolarAnalyzer() {
     };
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 1300, useWebSearch: false,
+        provider, apiKey, maxTokens: 2500, useWebSearch: false,
         content: "You are a landscape architecture assistant analyzing real computed solar-exposure data for zones in a park redesign project. For each zone, give a one-line shade-strategy recommendation citing the actual exposure hour count and which compass direction(s) most need shade coverage, based only on the data given. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone for shade intervention and why. Do not invent temperature or UV figures not present in the data. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
@@ -134,6 +136,37 @@ export default function SolarAnalyzer() {
     return lines.join("\n");
   }
 
+
+  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
+  const [overflowText, setOverflowText] = useState("");
+  function structuredOpts() {
+    return {
+      toolCode: "SOL",
+      meta,
+      inputRecord: [{label:"Location",value:location||"(not stated)"}],
+      findings: [{ title: "Analysis output", text: buildReportText() }],
+      chartNote: dayData.length ? "Sun elevation profile and per-zone exposure chart are reproduced in the PDF export." : "No computed data yet.",
+      chartsHtml: dayData.length
+        ? barChartSVG(dayData.map((r) => ({ label: `${r.hourLabel}  (${r.compass})`, value: r.elevation, display: r.elevation + " deg" })),
+            { title: `Sun elevation - ${activePreset.label}` })
+          + barChartSVG(zones.filter((z) => z.name.trim()).map((z) => ({ label: z.name, value: exposedHours(z).length, display: exposedHours(z).length + " h" })),
+            { title: "Unshaded medium/high exposure by zone", color: "#B84C3D" })
+        : "",
+      interpretation: insight?.conclusion || "",
+      conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
+      runLimitations: [],
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (!overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "SOL",
+        reportText: buildReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Time", "Elevation", "Azimuth", "Direction", "Heat Tier"], ...dayData.map((r) => [r.hourLabel, r.elevation, r.azimuth, r.compass, r.tier.label])]), "Hourly Sun Position");
@@ -152,35 +185,18 @@ export default function SolarAnalyzer() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  function exportWord() {
-    const rtfBody = buildReportText().replace(/\\/g, "\\\\").replace(/\n/g, "\\par ");
-    const blob = new Blob([`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}\\f0\\fs22 ${rtfBody}}`], { type: "application/rtf" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "solar-exposure-analysis.rtf";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
   function exportPDF() {
-    const win = window.open("", "_blank");
-    if (!win) { setInsightError("Browser blocked PDF tab. Allow pop-ups."); return; }
-    const max = Math.max(1, ...dayData.map((d) => d.elevation));
-    const bars = dayData.map((d) => `<div style="display:flex;align-items:center;margin-bottom:4px;"><div style="width:100px;font-size:10px;text-align:right;padding-right:8px;">${d.hourLabel}</div><div style="background:#1C2333;height:12px;width:${Math.max(3, (d.elevation / max) * 250)}px;border-radius:2px;margin-right:6px;"></div><div style="font-size:10px;">${d.elevation}</div></div>`).join("");
-    const zoneBars = zones.filter((z) => z.name.trim()).map((z) => ({ name: z.name, hours: exposedHours(z).length }));
-    const zMax = Math.max(1, ...zoneBars.map((d) => d.hours));
-    const zBars = zoneBars.map((d) => `<div style="display:flex;align-items:center;margin-bottom:4px;"><div style="width:100px;font-size:10px;text-align:right;padding-right:8px;">${d.name}</div><div style="background:#C9A46A;height:12px;width:${Math.max(3, (d.hours / zMax) * 250)}px;border-radius:2px;margin-right:6px;"></div><div style="font-size:10px;">${d.hours}</div></div>`).join("");
-    const html = `<html><head><title>Solar Exposure Analysis</title><style>body{font-family:Arial;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;}table{border-collapse:collapse;width:100%;font-size:11px;}td,th{border:1px solid #ddd;padding:4px;}.conclusion{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;margin-top:20px;}</style></head><body>
-    <h1>Solar Exposure Analysis</h1><p>Site: ${siteInfo?.resolved_name || location} | Date: ${activePreset.label}</p>
-    <h2>Sun Elevation by Hour</h2>${bars}
-    <h2>Zone Exposure Summary</h2>${zBars}
-    ${insight ? `<h2>AI Recommendations</h2><ul>${(insight.zone_recommendations || []).map((r) => `<li><b>${r.zone}</b>: ${r.recommendation}</li>`).join("")}</ul>` : ""}
-    ${insight?.conclusion ? `<div class="conclusion"><b>Conclusion:</b> ${insight.conclusion}</div>` : ""}
-    </body></html>`;
-    win.document.write(html); win.document.close();
-    setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 400);
+    withOverflow((o) => exportStructuredPDF(o, () => {
+      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+    }));
   }
 
   return (
     <div className="space-y-6">
+      <ToolIntro toolCode="SOL" />
+
       <div className="bg-[#FBF1E1] border border-[#E8D5B0] rounded-lg p-4 flex gap-3">
         <Info size={18} className="text-brand-warning shrink-0 mt-0.5" />
         <p className="text-sm text-brand-text">Solar position uses the standard NOAA solar calculation method — real astronomical math. For reliable AI insight results, keep to around 10-12 zones per analysis run.</p>
@@ -191,7 +207,7 @@ export default function SolarAnalyzer() {
         <div className="p-4 space-y-3">
           <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai" className="input" />
           <button onClick={resolveLocation} disabled={siteLoading || !apiKey} className="btn-gold w-full">
-            <Search size={18} /> {siteLoading ? "Resolving location..." : "Resolve Location"}
+            <Search size={18} /> {siteLoading ? "Finding coordinates..." : "Set Location & Compute Sun Path"}
           </button>
           {siteError && (<div className="space-y-1"><p className="text-xs text-[#3A362C] flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(siteError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-4">Technical: {siteError}</p></div>)}
           {siteInfo && <p className="text-xs text-brand-success">Resolved: {siteInfo.resolved_name} ({siteInfo.lat}, {siteInfo.lon}, UTC{siteInfo.utc_offset >= 0 ? "+" : ""}{siteInfo.utc_offset}) - {siteInfo.source}</p>}

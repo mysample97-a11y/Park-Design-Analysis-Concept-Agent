@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Sparkles, Plus, Trash2, Wind, AlertTriangle, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
+import ToolIntro from "../components/ToolIntro";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
-const SEASONS = [
+const DEFAULT_SEASONS = [
   { id: "winter", label: "Winter (Dec-Feb)", prevailing: "NW", speedRange: "10-25 km/h", character: "Cooler season. Generally calmer, with occasional rain-bearing systems arriving from the northwest.", dustRisk: "Low" },
   { id: "spring", label: "Spring (Feb-Apr)", prevailing: "NW, variable", speedRange: "15-40 km/h", character: "Strongest and most variable winds of the year. Can raise sand and dust storms.", dustRisk: "High" },
   { id: "summer", label: "Summer (May-Sep)", prevailing: 'NW ("Shamal")', speedRange: "10-30 km/h", character: "Persistent northwesterly Shamal wind, often carrying Gulf moisture. A real passive-cooling opportunity if not blocked.", dustRisk: "Medium" },
@@ -16,7 +18,31 @@ const SEASONS = [
 const RISK_COLOR = { Low: "#3D7A5C", Medium: "#B8863B", High: "#B84C3D" };
 
 export default function WindAnalyzer() {
-  const { provider, apiKey } = useAppContext();
+  const { provider, apiKey, meta } = useAppContext();
+  const [location, setLocation] = useState("");
+  const [SEASONS, setSeasons] = useState(DEFAULT_SEASONS);
+  const [researching, setResearching] = useState(false);
+  const [researchNote, setResearchNote] = useState("");
+  const [researchError, setResearchError] = useState("");
+  const [showRef, setShowRef] = useState(false);
+
+  async function researchLocation() {
+    if (!location.trim()) { setResearchError("Enter a project location first."); return; }
+    setResearching(true); setResearchError("");
+    try {
+      const text = await callAI({
+        provider, apiKey, maxTokens: 1400, useWebSearch: provider === "claude",
+        content: `For the location "${location}", give the prevailing seasonal wind characteristics. Respond with ONLY a JSON array of 4 season objects, no markdown fences: [{"id":"winter","label":"Winter (months)","prevailing":"compass direction","speedRange":"x-y km/h","character":"one sentence","dustRisk":"Low|Medium|High"}]. Use the four seasons appropriate to that location's climate. Base this on published climate references; do not invent precise wind-rose percentages.`,
+      });
+      const parsed = extractJSON(text);
+      if (!Array.isArray(parsed) || !parsed.length) throw new Error("Unexpected format");
+      setSeasons(parsed);
+      setResearchNote(`Wind reference researched for: ${location}`);
+    } catch (e) {
+      setResearchError(e.message || "Could not research this location. The default reference remains in use.");
+    } finally { setResearching(false); }
+  }
+
 
   const [zones, setZones] = useState([
     { id: uid(), name: "Public Cinema / Picnic Green Space", wantsCooling: true, hasScreening: false },
@@ -40,15 +66,15 @@ export default function WindAnalyzer() {
   async function generateInsight() {
     setInsightLoading(true); setInsight(null); setInsightError("");
     const summary = {
-      site: "Al Safa 2 Park, Jumeirah, Dubai",
+      site: location || meta?.siteDescription || meta?.projectName || "(location not stated)",
       wind_reference: SEASONS,
-      note: "Prevailing direction and speed range are sourced from general Dubai/UAE climate references. No precise monthly wind-rose percentage data was publicly available.",
+      note: researchNote || "Prevailing direction and speed range are from general published climate references for the stated location. Not precise wind-rose measurement.",
       zones: zones.filter((z) => z.name.trim()).map((z) => ({ zone: z.name, wants_passive_cooling: z.wantsCooling, has_windbreak_screening: z.hasScreening, assessment: zoneFlag(z).label })),
     };
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 1300,
-        content: "You are a landscape architecture assistant giving wind-design guidance for the Al Safa 2 Park redesign (Dubai), using only the sourced seasonal wind data and zone list below - no invented statistics. For each zone give a one-line recommendation on whether to keep it open to the prevailing NW breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        provider, apiKey, maxTokens: 2500,
+        content: "You are a landscape architecture assistant giving wind-design guidance for a park design at the stated location, using only the sourced seasonal wind data and zone list below - no invented statistics. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {
@@ -59,7 +85,7 @@ export default function WindAnalyzer() {
   }
 
   function buildReportText() {
-    let lines = ["AL SAFA 2 - WIND PATTERN REFERENCE & ZONE ASSESSMENT", "", "SEASONAL WIND REFERENCE"];
+    let lines = ["WIND PATTERN REFERENCE & ZONE ASSESSMENT", `Location: ${location || meta?.siteDescription || "(not stated)"}`, "", "SEASONAL WIND REFERENCE"];
     SEASONS.forEach((s) => lines.push(`  ${s.label}: ${s.prevailing}, ${s.speedRange}, dust risk ${s.dustRisk} - ${s.character}`));
     lines.push("", "ZONE ASSESSMENT");
     zones.filter((z) => z.name.trim()).forEach((z) => lines.push(`  ${z.name}: cooling=${z.wantsCooling ? "Yes" : "No"}, screening=${z.hasScreening ? "Yes" : "No"} -> ${zoneFlag(z).label}`));
@@ -71,6 +97,33 @@ export default function WindAnalyzer() {
     return lines.join("\n");
   }
 
+
+  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
+  const [overflowText, setOverflowText] = useState("");
+  function structuredOpts() {
+    return {
+      toolCode: "WND",
+      meta,
+      inputRecord: [{label:"Location",value:(typeof location!=="undefined"&&location)||"(not stated)"}],
+      findings: [{ title: "Analysis output", text: buildReportText() }],
+      chartNote: "Seasonal wind reference table is reproduced in the PDF export.",
+      chartsHtml: tableHTML(["Season", "Prevailing", "Speed", "Dust risk", "Character"],
+          SEASONS.map((s) => [s.label, s.prevailing, s.speedRange, s.dustRisk, s.character]), "Seasonal wind reference"),
+      interpretation: insight?.conclusion || "",
+      conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
+      runLimitations: [],
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (!overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "WND",
+        reportText: buildReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Season", "Prevailing", "Speed Range", "Dust Risk", "Character"], ...SEASONS.map((s) => [s.label, s.prevailing, s.speedRange, s.dustRisk, s.character])]), "Seasonal Reference");
@@ -87,48 +140,35 @@ export default function WindAnalyzer() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  function exportWord() {
-    const rtfBody = buildReportText().replace(/\\/g, "\\\\").replace(/\n/g, "\\par ");
-    const blob = new Blob([`{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}\\f0\\fs22 ${rtfBody}}`], { type: "application/rtf" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "al-safa-2-wind-analysis.rtf";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
   function exportPDF() {
-    const win = window.open("", "_blank");
-    if (!win) { setInsightError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again."); return; }
-    const html = `<html><head><title>Wind Pattern Reference</title><style>body{font-family:Arial;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;}table{border-collapse:collapse;width:100%;font-size:11px;}td,th{border:1px solid #ddd;padding:4px;}.conclusion{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;margin-top:20px;}</style></head><body>
-    <h1>Al Safa 2 - Wind Pattern Reference & Zone Assessment</h1>
-    <h2>Seasonal Wind Reference</h2><table><tr><th>Season</th><th>Prevailing</th><th>Speed</th><th>Dust Risk</th></tr>${SEASONS.map((s) => `<tr><td>${s.label}</td><td>${s.prevailing}</td><td>${s.speedRange}</td><td>${s.dustRisk}</td></tr>`).join("")}</table>
-    <h2>Zone Assessment</h2><ul>${zones.filter((z) => z.name.trim()).map((z) => `<li>${z.name}: ${zoneFlag(z).label}</li>`).join("")}</ul>
-    ${insight ? `<h2>AI Recommendations</h2><ul>${(insight.zone_recommendations || []).map((r) => `<li><b>${r.zone}</b>: ${r.recommendation}</li>`).join("")}</ul>` : ""}
-    ${insight?.conclusion ? `<div class="conclusion"><b>Conclusion:</b> ${insight.conclusion}</div>` : ""}
-    </body></html>`;
-    win.document.write(html); win.document.close();
-    setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 400);
+    withOverflow((o) => exportStructuredPDF(o, () => {
+      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+    }));
   }
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#FBEAE7] border border-[#F0C8C0] rounded-lg p-4 flex gap-3">
-        <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <div className="text-sm text-brand-text">
-          <p><span className="font-semibold">Lower precision than the Solar tool, by design.</span> Documented seasonal wind character, not a precise monthly wind-rose dataset.</p>
-          <p className="mt-2 text-brand-danger font-medium">For reliable AI insight results, keep to around 10-12 zones per analysis run.</p>
+      <ToolIntro toolCode="WND" />
+
+      <div className="card">
+        <div className="card-header">Project Location - Wind Reference</div>
+        <div className="p-4 space-y-2">
+          <input value={location} onChange={(e) => setLocation(e.target.value)}
+            placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai"
+            className="input" />
+          <button onClick={researchLocation} disabled={researching || !apiKey} className="btn-gold w-full">
+            {researching ? "Researching..." : "Research Wind Data for This Location"}
+          </button>
+          <p className="text-[10px] text-brand-text/60">
+            Optional. Without this, the built-in reference data below is used - which was compiled for a hot-arid
+            Gulf climate and may not suit other regions. Researching replaces it with data for your location.
+          </p>
+          {researchNote && <p className="text-xs text-brand-success">{researchNote}</p>}
+          {researchError && <p className="text-xs text-brand-danger">{friendlyError(researchError)}</p>}
         </div>
       </div>
-
-      <div className="bg-white rounded-lg border border-brand-border overflow-hidden">
-        <div className="px-4 py-3 border-b border-brand-border"><h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">Seasonal Wind Reference</h2></div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="text-left text-brand-text/60 text-xs uppercase tracking-wide border-b border-brand-border"><th className="px-4 py-2">Season</th><th className="px-4 py-2">Prevailing</th><th className="px-4 py-2">Speed</th><th className="px-4 py-2">Dust Risk</th><th className="px-4 py-2">Character</th></tr></thead>
-            <tbody>{SEASONS.map((s) => (<tr key={s.id} className="border-b border-[#F0EBDF] align-top"><td className="px-4 py-2 font-medium">{s.label}</td><td className="px-4 py-2 font-mono">{s.prevailing}</td><td className="px-4 py-2 font-mono">{s.speedRange}</td><td className="px-4 py-2"><span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: RISK_COLOR[s.dustRisk], background: RISK_COLOR[s.dustRisk] + "20" }}>{s.dustRisk}</span></td><td className="px-4 py-2 text-brand-text text-xs">{s.character}</td></tr>))}</tbody>
-          </table>
-        </div>
-      </div>
-
       <div className="card">
         <div className="card-header flex items-center justify-between">
           <span>Zone Wind Exposure Advisor</span>
@@ -152,6 +192,31 @@ export default function WindAnalyzer() {
             );
           })}
         </div>
+      </div>
+
+      <div className="bg-[#FBEAE7] border border-[#F0C8C0] rounded-lg p-4 flex gap-3">
+        <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
+        <div className="text-sm text-brand-text">
+          <p><span className="font-semibold">Lower precision than the Solar tool, by design.</span> Documented seasonal wind character, not a precise monthly wind-rose dataset.</p>
+          <p className="mt-2 text-brand-danger font-medium">For reliable AI insight results, keep to around 10-12 zones per analysis run.</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-brand-border overflow-hidden">
+        <button onClick={() => setShowRef((v) => !v)} className="w-full px-4 py-3 border-b border-brand-border flex items-center justify-between text-left">
+          <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">
+            Seasonal Wind Reference {researchNote ? "" : "(built-in default)"}
+          </h2>
+          <span className="text-xs text-brand-text">{showRef ? "Hide" : "Show"}</span>
+        </button>
+        {showRef && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-brand-text/60 text-xs uppercase tracking-wide border-b border-brand-border"><th className="px-4 py-2">Season</th><th className="px-4 py-2">Prevailing</th><th className="px-4 py-2">Speed</th><th className="px-4 py-2">Dust Risk</th><th className="px-4 py-2">Character</th></tr></thead>
+            <tbody>{SEASONS.map((s) => (<tr key={s.id} className="border-b border-[#F0EBDF] align-top"><td className="px-4 py-2 font-medium">{s.label}</td><td className="px-4 py-2 font-mono">{s.prevailing}</td><td className="px-4 py-2 font-mono">{s.speedRange}</td><td className="px-4 py-2"><span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: RISK_COLOR[s.dustRisk], background: RISK_COLOR[s.dustRisk] + "20" }}>{s.dustRisk}</span></td><td className="px-4 py-2 text-brand-text text-xs">{s.character}</td></tr>))}</tbody>
+          </table>
+        </div>
+        )}
       </div>
 
       <div className="card border-2">

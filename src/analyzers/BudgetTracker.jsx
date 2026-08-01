@@ -3,8 +3,10 @@ import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { useAppContext } from "../App";
+import ToolIntro from "../components/ToolIntro";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, formatNumber } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, barChartSVG, tableHTML } from "../utils/reportTemplate";
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
@@ -24,7 +26,7 @@ const CONFIDENCE_COLOR = {
 };
 
 export default function BudgetTracker() {
-  const { provider, apiKey } = useAppContext();
+  const { provider, apiKey, meta } = useAppContext();
   const [facilities, setFacilities] = useState([
     { id: uid(), name: "", area: "", rate: "" },
   ]);
@@ -46,7 +48,7 @@ export default function BudgetTracker() {
     setDetecting(true); setDetectError("");
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 1500,
+        provider, apiKey, maxTokens: 2500,
         content: "Extract a list of built facilities/zones from this park program description. For each, output {name, area (number in square meters, estimate if not stated but mark estimated), category}. Respond with ONLY a valid JSON array, no markdown fences.\n\nDESCRIPTION:\n" + pasteText,
       });
       const parsed = extractJSON(text);
@@ -92,7 +94,7 @@ export default function BudgetTracker() {
     };
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 1200,
+        provider, apiKey, maxTokens: 2500,
         content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: (1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high/low, (2) 'confidence_note': 1-2 sentences on which parts of this estimate rest on Assumption-Flagged rates and should be verified, (3) 'conclusion': 2-3 sentences on overall feasibility/next cost-planning step. Do not invent benchmark prices not present. Respond with ONLY valid JSON, no markdown fences: {\"observations\": [\"\"], \"confidence_note\": \"\", \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
@@ -116,6 +118,36 @@ export default function BudgetTracker() {
     return lines.join("\n");
   }
 
+
+  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
+  const [overflowText, setOverflowText] = useState("");
+  function structuredOpts() {
+    return {
+      toolCode: "BDG",
+      meta,
+      inputRecord: [{label:"Facilities entered",value:String(facilities.filter((f)=>f.name.trim()).length)},{label:"Rate assumptions",value:Object.entries(rates).map(([k,r])=>`${k} ${r.pct}% (${r.confidence})`).join("; ")}],
+      findings: [{ title: "Analysis output", text: buildReportText() }],
+      chartNote: "Cost build-up chart and facility schedule are reproduced in the PDF export.",
+      chartsHtml: tableHTML(["Facility", "Area m2", "Rate", "Subtotal"],
+          facilities.filter((f) => f.name.trim()).map((f) => [f.name, f.area, f.rate, formatNumber((Number(f.area)||0)*(Number(f.rate)||0))]),
+          "Facility schedule")
+        + barChartSVG(wrapperRows.map((r) => ({ label: r.label, value: r.amount, display: formatNumber(r.amount), color: r.bold ? "#1C2333" : "#C9A46A" })),
+            { title: "Cost build-up" }),
+      interpretation: insight?.conclusion || "",
+      conclusions: (insight?.observations || []),
+      runLimitations: [],
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (!overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "BDG",
+        reportText: buildReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Facility", "Area m2", "Rate AED/m2", "Subtotal AED"], ...facilities.filter((f) => f.name.trim()).map((f) => [f.name, Number(f.area) || 0, Number(f.rate) || 0, (Number(f.area) || 0) * (Number(f.rate) || 0)])]), "Facilities");
@@ -128,22 +160,17 @@ export default function BudgetTracker() {
     }
     downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "budget-estimate.xlsx", "application/octet-stream");
   }
-  function exportWord() { downloadFile(buildRTF(buildReportText()), "budget-estimate.rtf", "application/rtf"); }
+  function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
-    const barsHtml = wrapperRows.map((r) => { const max = Math.max(1, totalCapex); return `<div style="display:flex;align-items:center;margin-bottom:4px;"><div style="width:180px;font-size:11px;text-align:right;padding-right:8px;${r.bold ? "font-weight:bold;" : ""}">${r.label}</div><div style="background:${r.bold ? "#1C2333" : "#C9A46A"};height:14px;width:${Math.max(3, (r.amount / max) * 240)}px;border-radius:2px;margin-right:6px;"></div><div style="font-size:11px;">${formatNumber(r.amount)}</div></div>`; }).join("");
-    const html = `<html><head><title>Budget Estimate</title><style>body{font-family:Arial;padding:30px;color:#1C2333;}h1{color:#1C2333;}h2{color:#5A5445;border-bottom:1px solid #E8E2D5;}table{border-collapse:collapse;width:100%;font-size:11px;}td,th{border:1px solid #ddd;padding:4px;}.note{background:#FBEAE7;border:1px solid #F0C8C0;padding:10px;border-radius:6px;font-size:12px;margin-bottom:20px;}.conclusion{background:#FBF1E1;border:1px solid #E8D5B0;padding:14px;border-radius:6px;margin-top:16px;}</style></head><body>
-    <h1>Budget Estimate - MVP/Prototype</h1>
-    <div class="note"><b>Note:</b> Cascading wrapper cost estimate (RICS NRM1 style). Rates carry confidence bands; Assumption-Flagged items must be verified against real benchmark data before use.</div>
-    <h2>Facilities</h2><table><tr><th>Facility</th><th>Area m2</th><th>Rate AED/m2</th><th>Subtotal AED</th></tr>${facilities.filter((f) => f.name.trim()).map((f) => `<tr><td>${f.name}</td><td>${f.area}</td><td>${f.rate}</td><td>${formatNumber((Number(f.area) || 0) * (Number(f.rate) || 0))}</td></tr>`).join("")}</table>
-    <h2>Cost Build-Up</h2>${barsHtml}
-    ${insight ? `<h2>AI Observations</h2><ul>${(insight.observations || []).map((o) => `<li>${o}</li>`).join("")}</ul><p><b>Confidence:</b> ${insight.confidence_note || ""}</p>` : ""}
-    ${insight?.conclusion ? `<div class="conclusion"><b>Conclusion:</b> ${insight.conclusion}</div>` : ""}
-    </body></html>`;
-    printHTML(html, () => setInsightError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again."));
+    withOverflow((o) => exportStructuredPDF(o, () => {
+      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+    }));
   }
 
   return (
     <div className="space-y-6">
+      <ToolIntro toolCode="BDG" />
+
       <div>
         <h2 className="text-xl font-bold text-brand-dark flex items-center gap-2"><Calculator size={20} className="text-brand-gold" /> Budget Tracker</h2>
         <p className="text-sm text-brand-text mt-1">Estimate capital and operating cost with a cascading wrapper method - every rate carries an honest confidence band.</p>

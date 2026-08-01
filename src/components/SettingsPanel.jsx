@@ -11,6 +11,16 @@ const MODEL_KEYS = {
   gemini: "site_analysis_gemini_model",
 };
 
+const META_KEY = "site_analysis_project_meta";
+
+const DEFAULT_META = {
+  projectName: "",
+  projectCode: "PRJ",
+  siteDescription: "",
+  author: "",
+  status: "DRAFT",
+};
+
 // Sensible current defaults (editable in Settings if the provider renames them)
 const DEFAULT_MODELS = {
   claude: "claude-sonnet-4-6",
@@ -20,6 +30,7 @@ const DEFAULT_MODELS = {
 export function useApiKeys() {
   const [keys, setKeys] = useState({ claude: "", gemini: "" });
   const [models, setModels] = useState({ ...DEFAULT_MODELS });
+  const [meta, setMeta] = useState({ ...DEFAULT_META });
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -32,6 +43,8 @@ export function useApiKeys() {
         claude: localStorage.getItem(MODEL_KEYS.claude) || DEFAULT_MODELS.claude,
         gemini: localStorage.getItem(MODEL_KEYS.gemini) || DEFAULT_MODELS.gemini,
       });
+      const rawMeta = localStorage.getItem(META_KEY);
+      if (rawMeta) setMeta({ ...DEFAULT_META, ...JSON.parse(rawMeta) });
     } catch {
       // localStorage blocked (private mode, etc.)
     }
@@ -58,6 +71,14 @@ export function useApiKeys() {
     }
   };
 
+  const saveMeta = (patch) => {
+    setMeta((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(META_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   const clearAll = () => {
     setKeys({ claude: "", gemini: "" });
     setModels({ ...DEFAULT_MODELS });
@@ -72,10 +93,10 @@ export function useApiKeys() {
   const getActiveKey = (provider) => keys[provider] || "";
   const getActiveModel = (provider) => models[provider] || DEFAULT_MODELS[provider];
 
-  return { keys, models, loaded, saveKey, saveModel, clearAll, getActiveKey, getActiveModel };
+  return { keys, models, meta, loaded, saveKey, saveModel, saveMeta, clearAll, getActiveKey, getActiveModel };
 }
 
-export default function SettingsPanel({ keys, models, saveKey, saveModel, clearAll, onClose }) {
+export default function SettingsPanel({ keys, models, meta, saveKey, saveModel, saveMeta, clearAll, onClose }) {
   const [showClaude, setShowClaude] = useState(false);
   const [showGemini, setShowGemini] = useState(false);
   const [cleared, setCleared] = useState(false);
@@ -101,6 +122,45 @@ export default function SettingsPanel({ keys, models, saveKey, saveModel, clearA
         )}
       </div>
       <div className="p-4 space-y-4">
+        {/* Project details - used in every report title block */}
+        <div className="border border-brand-border rounded-lg p-3 space-y-2">
+          <p className="text-xs font-semibold text-brand-text uppercase tracking-wide">Project Details</p>
+          <p className="text-[10px] text-brand-text/60">
+            Used in the title block and document reference of every report this app exports.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <label className="text-[10px] text-brand-text">
+              Project name
+              <input type="text" value={meta?.projectName || ""} placeholder="e.g. Al Safa 2 Park Redesign"
+                onChange={(e) => saveMeta({ projectName: e.target.value })} className="input text-xs mt-0.5" />
+            </label>
+            <label className="text-[10px] text-brand-text">
+              Project code (report prefix)
+              <input type="text" value={meta?.projectCode || ""} placeholder="ALS2"
+                onChange={(e) => saveMeta({ projectCode: e.target.value.toUpperCase().replace(/\s/g, "") })}
+                className="input text-xs mt-0.5 font-mono" />
+            </label>
+            <label className="text-[10px] text-brand-text">
+              Site description
+              <input type="text" value={meta?.siteDescription || ""} placeholder="e.g. Jumeirah, Dubai - 15,000 sqm"
+                onChange={(e) => saveMeta({ siteDescription: e.target.value })} className="input text-xs mt-0.5" />
+            </label>
+            <label className="text-[10px] text-brand-text">
+              Author
+              <input type="text" value={meta?.author || ""} placeholder="Your name"
+                onChange={(e) => saveMeta({ author: e.target.value })} className="input text-xs mt-0.5" />
+            </label>
+          </div>
+          <label className="text-[10px] text-brand-text block">
+            Status
+            <select value={meta?.status || "DRAFT"} onChange={(e) => saveMeta({ status: e.target.value })}
+              className="input text-xs mt-0.5">
+              <option value="DRAFT">DRAFT</option>
+              <option value="ISSUED">ISSUED</option>
+            </select>
+          </label>
+        </div>
+
         {/* Security Warning */}
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-3">
           <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
