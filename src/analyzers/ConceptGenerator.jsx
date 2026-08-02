@@ -4,9 +4,10 @@ import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
 
 const POSITIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "Center"];
 const GRID_ORDER = ["NW", "N", "NE", "W", "Center", "E", "SW", "S", "SE"];
@@ -50,6 +51,9 @@ function BubbleDiagram({ zones }) {
 export default function ConceptGenerator() {
   const { provider, apiKey, meta } = useAppContext();
   const [brief, setBrief] = useState("");
+  const [userIdeas, setUserIdeas] = useState("");
+  const [siteAreaM2, setSiteAreaM2] = useState("");
+  const [siteContext, setSiteContext] = useState({ N: "", E: "", S: "", W: "" });
   const [numConcepts, setNumConcepts] = useState(3);
   const [concepts, setConcepts] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -66,7 +70,7 @@ export default function ConceptGenerator() {
         provider, apiKey, maxTokens: 6000,
         content:
           `You are a landscape architecture concept-design assistant. Given the site analysis findings and program brief below, generate ${numConcepts} DISTINCT zoning concept variants for a park redesign. Each concept should meaningfully differ in spatial organization, not just wording. ` +
-          "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
+          "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point), facilities (array of short strings naming the BUILT facilities in that zone, e.g. 'shade pergola', 'play equipment', 'cafe kiosk', 'paved plaza' - these feed a cost estimate so be concrete and complete)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
           "Every zone rationale MUST reference something specific from the brief - no generic rationale. " +
           `Respond with ONLY a valid JSON array of ${numConcepts} concept objects, no markdown fences.\n\nSITE ANALYSIS & PROGRAM BRIEF:\n${brief}`,
       });
@@ -103,14 +107,21 @@ export default function ConceptGenerator() {
       lines.push(`CONCEPT ${i + 1}: ${c.name}`, c.vision, "");
       (c.zones || []).forEach((z) => lines.push(`  - ${z.name} (${z.position}, ~${z.area_pct}%): ${z.rationale}`));
       lines.push("  Scores: " + SCORE_CRITERIA.map((sc) => `${sc.label}=${c.scores?.[sc.id] ?? "-"}`).join(", "), `  Overall: ${overallScore(c)}/10`, "");
+      const fac = (c.zones || []).flatMap((z) => (z.facilities || []).map((f) => `${f} (${z.name}${siteAreaM2 ? `, ~${Math.round((Number(z.area_pct)||0)/100*Number(siteAreaM2)).toLocaleString()} m2 zone` : ""})`));
+      if (fac.length) { lines.push("  FACILITY SCHEDULE (for cost estimating):"); fac.forEach((f) => lines.push(`    - ${f}`)); lines.push(""); }
     });
-    if (recommendation) lines.push("RECOMMENDATION", recommendation.recommendation || "", "", "TRADEOFFS", recommendation.tradeoffs || "");
+    if (recommendation) {
+      lines.push("RECOMMENDED CONCEPT", recommendation.recommendation || "", "", "TRADE-OFFS", recommendation.tradeoffs || "", "");
+    } else {
+      lines.push("RECOMMENDED CONCEPT", "(not generated - click 'Recommend Best Concept' before exporting)", "");
+    }
     return lines.join("\n");
   }
 
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
       toolCode: "CPT",
@@ -125,21 +136,21 @@ export default function ConceptGenerator() {
             concepts.map((c) => [c.name, ...SCORE_CRITERIA.map((s) => c.scores?.[s.id] ?? ""), overallScore(c)]),
             "Concept comparison")
           + concepts.map((c) =>
-              `<div style="margin:14px 0;">${bubbleDiagramSVG(c.zones || [], c.name)}</div>`
+              `<div style="margin:14px 0;">${bubbleDiagramSVG(c.zones || [], c.name, { siteAreaM2: Number(siteAreaM2) || 0, context: siteContext, vision: c.vision })}</div>`
               + tableHTML(["Zone", "Position", "Area %", "Rationale"],
                   (c.zones || []).map((z) => [z.name, z.position, z.area_pct, z.rationale]),
                   `${c.name} - zone schedule`)
             ).join("")
         : "",
-      interpretation: recommendation?.recommendation || "",
-      conclusions: [recommendation?.tradeoffs].filter(Boolean),
+      interpretation: recommendation ? `${recommendation.recommendation || ""}${recommendation.tradeoffs ? "\n\nTrade-offs: " + recommendation.tradeoffs : ""}` : "",
+      conclusions: recommendation ? [recommendation.recommendation, recommendation.tradeoffs].filter(Boolean) : [],
       runLimitations: [],
       extraRefs: [],
       overflow: overflowText,
     };
   }
   async function withOverflow(run) {
-    if (!overflowText && apiKey) {
+    if (includeOverflow && !overflowText && apiKey) {
       const o = await generateOverflow({ provider, apiKey, toolCode: "CPT",
         reportText: buildReportText() });
       setOverflowText(o);
@@ -185,6 +196,35 @@ export default function ConceptGenerator() {
         <div className="card-header">Step 1 - Site Findings & Program Brief</div>
         <div className="p-4 space-y-3">
           <textarea value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Paste your key site analysis findings (adjacencies, sun/wind exposure, survey themes, accessibility constraints) and the required program/facility list here..." rows={9} className="textarea" />
+          <div>
+            <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">Your own zone / facility ideas (optional)</label>
+            <p className="text-[10px] text-brand-text/60 mb-1">
+              Your design intent enters here rather than in the analysis tools. Where an idea conflicts
+              with an analysis finding, the concepts will say so explicitly instead of silently dropping it.
+            </p>
+            <textarea value={userIdeas} onChange={(e) => setUserIdeas(e.target.value)} rows={4}
+              placeholder="e.g. a central event lawn, separated jogging loop, cafe near the metro edge, inclusive playground..."
+              className="textarea" />
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">Total site area (m2)</label>
+              <p className="text-[10px] text-brand-text/60 mb-1">Needed so each bubble shows a real area for cost estimating.</p>
+              <input type="number" value={siteAreaM2} onChange={(e) => setSiteAreaM2(e.target.value)} placeholder="15000" className="input font-mono" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">Site context (optional)</label>
+              <p className="text-[10px] text-brand-text/60 mb-1">Labels the diagram edges so orientation is readable.</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {["N", "E", "S", "W"].map((d) => (
+                  <input key={d} value={siteContext[d]} onChange={(e) => setSiteContext({ ...siteContext, [d]: e.target.value })}
+                    placeholder={`${d}: e.g. main road`} className="input text-xs" />
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
             <label className="text-sm text-brand-text">Number of concepts:</label>
             <select value={numConcepts} onChange={(e) => setNumConcepts(Number(e.target.value))} className="text-sm bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5"><option value={3}>3</option><option value={4}>4</option></select>
@@ -208,7 +248,7 @@ export default function ConceptGenerator() {
           {concepts.map((c, i) => (
             <div key={i} className="card p-4 space-y-3">
               <div><h3 className="text-base font-bold">{c.name}</h3><p className="text-sm text-brand-text italic">{c.vision}</p></div>
-              <BubbleDiagram zones={c.zones || []} />
+              <div dangerouslySetInnerHTML={{ __html: bubbleDiagramSVG(c.zones || [], c.name, { siteAreaM2: Number(siteAreaM2) || 0, context: siteContext, vision: c.vision }) }} />
               <div className="space-y-1">{(c.zones || []).map((z, zi) => (<p key={zi} className="text-xs text-brand-dark"><span className="font-semibold">{z.name}</span> ({z.position}, ~{z.area_pct}%): {z.rationale}</p>))}</div>
             </div>
           ))}
@@ -221,8 +261,28 @@ export default function ConceptGenerator() {
             {recLoading && <p className="text-sm text-brand-text">Comparing concept scores...</p>}
             {recError && (<div className="space-y-1"><p className="text-sm text-brand-dark flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(recError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {recError}</p></div>)}
             {recommendation && (<div className="space-y-2 text-sm text-brand-dark"><p><span className="font-semibold">Recommendation:</span> {recommendation.recommendation}</p><p><span className="font-semibold">Tradeoffs:</span> {recommendation.tradeoffs}</p></div>)}
-            {!recommendation && !recLoading && !recError && <p className="text-sm text-brand-text">Once concepts are generated, get an AI recommendation on which to move forward with.</p>}
+            {!recommendation && !recLoading && !recError && (
+              <p className="text-sm text-brand-text">
+                Once concepts are generated, get an AI recommendation on which to move forward with.
+                <span className="block text-[11px] text-brand-warning mt-1">
+                  The recommendation is included in the exported report - generate it before exporting.
+                </span>
+              </p>
+            )}
           </div>
+
+          <ReportPreview
+
+            reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+
+            chartsHtml={structuredOpts().chartsHtml}
+
+            includeOverflow={includeOverflow}
+
+            setIncludeOverflow={setIncludeOverflow}
+
+          />
+
 
           <div className="card p-4">
             <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h3>

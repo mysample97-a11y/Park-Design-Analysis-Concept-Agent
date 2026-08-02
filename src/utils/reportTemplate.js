@@ -29,11 +29,7 @@ export const TOOL_SPECS = {
       "Gradient and cross-fall compliance cannot be verified without survey-grade elevation data. Where elevation data is absent, gradient items are reported as Pending rather than Pass.",
       "Capacity figures are indicative planning bands, not modelled occupancy.",
     ],
-    refs: [
-      { t: "Dubai Universal Design Code", o: "Dubai Municipality", y: "", u: "" },
-      { t: "Dubai Building Code", o: "Dubai Development Authority", y: "2021",
-        u: "https://dda.gov.ae/-/media/Project/TECOM/Media/DDA/Planning-and-development/Design/pdf/Dubai-Building-Code_English_2021-Edition.pdf" },
-    ],
+    refs: [],
     convention:
       "Accessibility findings should record the specific standard each element was measured against, not a bare pass or fail, so the check is auditable.",
   },
@@ -410,11 +406,18 @@ export async function generateOverflow({ provider, apiKey, toolCode, reportText 
   try {
     const spec = TOOL_SPECS[toolCode];
     const text = await callAI({
-      provider, apiKey, maxTokens: 600,
+      provider, apiKey, maxTokens: 900,
       content: `${OVERFLOW_PROMPT}\n\nTOOL: ${spec ? spec.name : toolCode}\n\nSTRUCTURED REPORT ALREADY PRODUCED:\n${reportText}`,
     });
-    const t = (text || "").trim();
+    let t = (text || "").trim();
     if (!t || /^nothing material remains\.?$/i.test(t)) return "Nothing material remains.";
+    // Trim to the last complete sentence so the appendix never ends mid-word.
+    const lastStop = Math.max(t.lastIndexOf(". "), t.lastIndexOf(".\n"), t.lastIndexOf("."));
+    if (lastStop > 40 && lastStop < t.length - 1) t = t.slice(0, lastStop + 1);
+    if (!/[.!?]$/.test(t)) {
+      const cut = t.lastIndexOf(" ");
+      if (cut > 40) t = t.slice(0, cut) + " [truncated]";
+    }
     return t;
   } catch {
     return ""; // fall back to the default line in the template
@@ -447,11 +450,16 @@ export function exportStructuredPDF(opts, onBlocked) {
 const CHART_COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B", "#8A6A3A", "#5A5445"];
 const GRID_POS = ["NW", "N", "NE", "W", "Center", "E", "SW", "S", "SE"];
 
-/** Renders one concept's bubble diagram as standalone inline SVG for export. */
-export function bubbleDiagramSVG(zones = [], title = "") {
+/** Renders one concept's bubble diagram as inline SVG.
+ *  Shows: colour-coded zones, zone name, AREA (m2 and %), a site-context ring
+ *  naming adjacent roads/facilities per edge, and a north point. */
+export function bubbleDiagramSVG(zones = [], title = "", opts = {}) {
   if (!zones.length) return "";
-  const cellW = 150, cellH = 100, pad = 26;
-  const w = cellW * 3 + pad * 2, h = cellH * 3 + pad * 2 + 24;
+  const { siteAreaM2 = 0, context = {}, vision = "" } = opts; // context: {N,NE,E,SE,S,SW,W,NW}
+  const cell = 168, pad = 30, ctxBand = 46;
+  const gridW = cell * 3, gridH = cell * 3;
+  const w = gridW + pad * 2 + ctxBand * 2;
+  const h = gridH + pad * 2 + ctxBand * 2 + 34;
   const maxArea = Math.max(1, ...zones.map((z) => Number(z.area_pct) || 5));
   const byPos = {};
   GRID_POS.forEach((p) => (byPos[p] = []));
@@ -459,28 +467,78 @@ export function bubbleDiagramSVG(zones = [], title = "") {
     const pos = GRID_POS.includes(z.position) ? z.position : "Center";
     byPos[pos].push(z);
   });
-  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">`;
+  const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const gx = pad + ctxBand, gy = 34 + pad + ctxBand;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" font-family="Arial, Helvetica, sans-serif">`;
   svg += `<rect width="${w}" height="${h}" fill="#ffffff"/>`;
-  if (title) svg += `<text x="${w / 2}" y="18" text-anchor="middle" font-family="Arial" font-size="13" font-weight="bold" fill="#1C2333">${esc(title)}</text>`;
+  if (title) svg += `<text x="${w / 2}" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#1C2333">${esc(title)}</text>`;
+  if (siteAreaM2) svg += `<text x="${w / 2}" y="32" text-anchor="middle" font-size="9" fill="#5A5445">Site area ${Number(siteAreaM2).toLocaleString()} m2 - bubble size is proportional to zone area</text>`;
+
+  // site boundary
+  svg += `<rect x="${gx - 6}" y="${gy - 6}" width="${gridW + 12}" height="${gridH + 12}" fill="#FAF9F6" stroke="#1C2333" stroke-width="2" rx="6"/>`;
+
+  // context ring labels
+  const ctxAt = {
+    N:  [gx + gridW / 2, gy - 16, "middle"],
+    S:  [gx + gridW / 2, gy + gridH + 26, "middle"],
+    W:  [gx - 12, gy + gridH / 2, "end"],
+    E:  [gx + gridW + 12, gy + gridH / 2, "start"],
+    NW: [gx - 12, gy - 16, "end"],
+    NE: [gx + gridW + 12, gy - 16, "start"],
+    SW: [gx - 12, gy + gridH + 26, "end"],
+    SE: [gx + gridW + 12, gy + gridH + 26, "start"],
+  };
+  Object.entries(ctxAt).forEach(([dir, [x, y, anchor]]) => {
+    const label = context[dir];
+    if (!label) return;
+    svg += `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="8.5" fill="#8A6A3A" font-weight="bold">${esc(String(label).slice(0, 34))}</text>`;
+  });
+
+  // north point
+  svg += `<g transform="translate(${gx + gridW + 20},${gy + 14})"><polygon points="0,-11 5,6 0,2 -5,6" fill="#1C2333"/><text x="0" y="18" text-anchor="middle" font-size="8" fill="#1C2333" font-weight="bold">N</text></g>`;
+
   let ci = 0;
   GRID_POS.forEach((pos, idx) => {
     const col = idx % 3, row = Math.floor(idx / 3);
-    const x = pad + col * cellW, y = 24 + pad + row * cellH;
-    svg += `<rect x="${x}" y="${y}" width="${cellW - 6}" height="${cellH - 6}" fill="none" stroke="#DDD6C9" stroke-dasharray="4 3"/>`;
-    svg += `<text x="${x + 5}" y="${y + 13}" font-family="Arial" font-size="8" fill="#C9C6BE">${pos}</text>`;
+    const x = gx + col * cell, y = gy + row * cell;
+    svg += `<rect x="${x + 3}" y="${y + 3}" width="${cell - 6}" height="${cell - 6}" fill="none" stroke="#E8E2D5" stroke-dasharray="4 3"/>`;
+    svg += `<text x="${x + 8}" y="${y + 16}" font-size="8" fill="#D8D2C4">${pos}</text>`;
     const list = byPos[pos];
     list.forEach((z, k) => {
-      const r = Math.max(17, Math.min(40, ((Number(z.area_pct) || 5) / maxArea) * 40));
-      const cx = x + (cellW - 6) / 2 + (k - (list.length - 1) / 2) * (r * 1.7);
-      const cy = y + (cellH - 6) / 2 + 4;
-      const fill = CHART_COLORS[ci++ % CHART_COLORS.length];
-      svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
-      const name = esc(z.name || "").slice(0, 16);
-      svg += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" font-family="Arial" font-size="${Math.max(6, r / 4.2)}" fill="#ffffff">${name}</text>`;
-      svg += `<text x="${cx}" y="${cy + r + 9}" text-anchor="middle" font-family="Arial" font-size="7" fill="#5A5445">${esc(z.area_pct || "")}%</text>`;
+      const pct = Number(z.area_pct) || 5;
+      const r = Math.max(30, Math.min(60, (pct / maxArea) * 58));
+      const cx = x + (cell - 6) / 2 + (k - (list.length - 1) / 2) * (r * 1.9);
+      const cy = y + (cell - 6) / 2 + 6;
+      const fill = CHART_COLORS[ci % CHART_COLORS.length];
+      ci++;
+      svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" fill-opacity="0.92" stroke="#ffffff" stroke-width="1.5"/>`;
+      // wrap zone name onto up to 3 lines that fit inside the circle
+      const words = String(z.name || "").split(/\s+/);
+      const maxChars = Math.max(7, Math.floor(r / 3.4));
+      const lines = [];
+      let cur = "";
+      words.forEach((word) => {
+        if ((cur + " " + word).trim().length <= maxChars) cur = (cur + " " + word).trim();
+        else { if (cur) lines.push(cur); cur = word.slice(0, maxChars); }
+      });
+      if (cur) lines.push(cur);
+      const shown = lines.slice(0, 3);
+      const fs = Math.max(7, Math.min(10, r / 5.2));
+      const startY = cy - ((shown.length - 1) * fs) / 2 - 3;
+      shown.forEach((ln, i) => {
+        svg += `<text x="${cx}" y="${startY + i * (fs + 1.5)}" text-anchor="middle" font-size="${fs}" fill="#ffffff" font-weight="600">${esc(ln)}</text>`;
+      });
+      // AREA label - required by the Budget Tracker
+      const m2 = siteAreaM2 ? Math.round((pct / 100) * Number(siteAreaM2)) : 0;
+      const areaTxt = m2 ? `${pct}%  ~${m2.toLocaleString()} m2` : `${pct}%`;
+      svg += `<text x="${cx}" y="${startY + shown.length * (fs + 1.5) + 2}" text-anchor="middle" font-size="${Math.max(6.5, fs - 1.5)}" fill="#ffffff" fill-opacity="0.95">${esc(areaTxt)}</text>`;
     });
   });
+
+  if (vision) {
+    svg += `<text x="${w / 2}" y="${h - 6}" text-anchor="middle" font-size="8" fill="#5A5445" font-style="italic">${esc(String(vision).slice(0, 120))}</text>`;
+  }
   svg += `</svg>`;
   return svg;
 }

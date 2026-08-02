@@ -3,10 +3,11 @@ import { Sparkles, Plus, Trash2, Sun, Info, AlertTriangle, Search } from "lucide
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from "recharts";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, barChartSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -108,7 +109,7 @@ export default function SolarAnalyzer() {
       site: siteInfo.resolved_name || location,
       zones: zones.filter((z) => z.name.trim()).map((z) => {
         const exposed = exposedHours(z);
-        return { zone: z.name, currently_shaded_directions: z.shaded, high_medium_exposure_hours: exposed.length, exposure_hour_list: exposed.map((r) => `${r.hourLabel} (${r.tier.label}, sun from ${r.compass})`) };
+        return { zone: z.name, currently_shaded_directions: z.shaded, high_medium_exposure_hours: Number((exposed.length*0.5).toFixed(1)), exposure_hour_list: exposed.map((r) => `${r.hourLabel} (${r.tier.label}, sun from ${r.compass})`) };
       }),
     };
     try {
@@ -127,7 +128,7 @@ export default function SolarAnalyzer() {
     lines.push("HOURLY SUN POSITION");
     dayData.forEach((r) => lines.push(`  ${r.hourLabel}: ${r.elevation} deg elevation, ${r.azimuth} deg azimuth (${r.compass}), ${r.tier.label} heat tier`));
     lines.push("", "ZONE EXPOSURE SUMMARY");
-    zones.filter((z) => z.name.trim()).forEach((z) => { const exposed = exposedHours(z); lines.push(`  ${z.name} - shaded: ${z.shaded.join(", ") || "none"} - exposed hours: ${exposed.length}`); });
+    zones.filter((z) => z.name.trim()).forEach((z) => { const exposed = exposedHours(z); lines.push(`  ${z.name} - shaded: ${z.shaded.join(", ") || "none"} - exposed hours: ${(exposed.length*0.5).toFixed(1)}`); });
     if (insight) {
       lines.push("", "AI RECOMMENDATIONS");
       (insight.zone_recommendations || []).forEach((r) => lines.push(`  ${r.zone}: ${r.recommendation}`));
@@ -139,6 +140,7 @@ export default function SolarAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
       toolCode: "SOL",
@@ -149,7 +151,7 @@ export default function SolarAnalyzer() {
       chartsHtml: dayData.length
         ? barChartSVG(dayData.map((r) => ({ label: `${r.hourLabel}  (${r.compass})`, value: r.elevation, display: r.elevation + " deg" })),
             { title: `Sun elevation - ${activePreset.label}` })
-          + barChartSVG(zones.filter((z) => z.name.trim()).map((z) => ({ label: z.name, value: exposedHours(z).length, display: exposedHours(z).length + " h" })),
+          + barChartSVG(zones.filter((z) => z.name.trim()).map((z) => ({ label: z.name, value: exposedHours(z).length*0.5, display: (exposedHours(z).length*0.5).toFixed(1) + " h" })),
             { title: "Unshaded medium/high exposure by zone", color: "#B84C3D" })
         : "",
       interpretation: insight?.conclusion || "",
@@ -160,7 +162,7 @@ export default function SolarAnalyzer() {
     };
   }
   async function withOverflow(run) {
-    if (!overflowText && apiKey) {
+    if (includeOverflow && !overflowText && apiKey) {
       const o = await generateOverflow({ provider, apiKey, toolCode: "SOL",
         reportText: buildReportText() });
       setOverflowText(o);
@@ -171,7 +173,7 @@ export default function SolarAnalyzer() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Time", "Elevation", "Azimuth", "Direction", "Heat Tier"], ...dayData.map((r) => [r.hourLabel, r.elevation, r.azimuth, r.compass, r.tier.label])]), "Hourly Sun Position");
     const zoneRows = [["Zone", "Shaded Directions", "Exposure Hours"]];
-    zones.filter((z) => z.name.trim()).forEach((z) => zoneRows.push([z.name, z.shaded.join(", ") || "none", exposedHours(z).length]));
+    zones.filter((z) => z.name.trim()).forEach((z) => zoneRows.push([z.name, z.shaded.join(", ") || "none", (exposedHours(z).length*0.5)]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(zoneRows), "Zone Summary");
     if (insight) {
       const rows = [["Zone", "Recommendation"]];
@@ -253,7 +255,7 @@ export default function SolarAnalyzer() {
                       <p className="text-[10px] text-brand-text/60 mb-1 uppercase tracking-wide">Directions already shaded</p>
                       <div className="flex flex-wrap gap-1.5">{DIRECTIONS.map((d) => (<button key={d} onClick={() => toggleShaded(z.id, d)} className={`w-9 h-8 rounded text-xs font-medium border transition ${z.shaded.includes(d) ? "bg-brand-success text-white border-brand-success" : "bg-white text-brand-dark border-[#DDD6C9]"}`}>{d}</button>))}</div>
                     </div>
-                    <p className="text-xs"><span className="font-semibold" style={{ color: exposed.length > 6 ? "#B84C3D" : exposed.length > 2 ? "#B8863B" : "#3D7A5C" }}>{exposed.length} hour{exposed.length !== 1 ? "s" : ""}</span> of Medium/High sun exposure, unshaded.</p>
+                    <p className="text-xs"><span className="font-semibold" style={{ color: exposed.length > 6 ? "#B84C3D" : exposed.length > 2 ? "#B8863B" : "#3D7A5C" }}>{(exposed.length*0.5).toFixed(1)} hours</span> of Medium/High sun exposure, unshaded.</p>
                   </div>
                 );
               })}

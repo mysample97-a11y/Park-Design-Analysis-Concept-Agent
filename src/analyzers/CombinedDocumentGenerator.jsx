@@ -5,9 +5,10 @@ import * as mammoth from "mammoth";
 import { callAI } from "../utils/ai";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF, fileToBase64Raw, copyToClipboard } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 
 const REG_DEFAULT = `Governing Standards: Dubai Universal Design Code (max ramp gradient 8%/1:12, min ramp width 1.0m, min crossing width 2.0m, max cross-fall 2%, max ramp run 10m, handrails above 0.5m level change); UAE Federal Law No. 29 of 2006 (Rights of People of Determination); Neighborhood Parks Manual (peak capacity 150-400 visitors/10,000sqm by density band, 15% leasable/commercial area target).
 Compliance method: every path/ramp/crossing checked programmatically against these standards, tagged Pass/Needs Review/Pending.
@@ -21,7 +22,8 @@ Note: precedents cited for design logic, not scale-equivalent replication.`;
 
 const SECTIONS = [
   { id: "site", label: "1. Site Location & Urban Context", placeholder: "Paste the Site Context tool's adjacency findings + GIS map notes...", default: "" },
-  { id: "climate", label: "2. Climatic Analysis", placeholder: "Paste the Solar + Wind tool conclusions...", default: "" },
+  { id: "solar", label: "2a. Solar Exposure Analysis", placeholder: "Paste the Solar Exposure tool's report or conclusion...", default: "" },
+  { id: "wind", label: "2b. Wind Exposure Analysis", placeholder: "Paste the Wind Exposure tool's report or conclusion...", default: "" },
   { id: "vegetation", label: "3. Vegetation, Terrain & Soil", placeholder: "Paste the Vegetation tool's conclusion...", default: "" },
   { id: "community", label: "4. User & Community Analysis", placeholder: "Paste the Survey Analyzer's conclusion + Parks Manual capacity/audience data...", default: "" },
   { id: "regulatory", label: "5. Regulatory & Accessibility Framework", placeholder: "Paste the regulatory standards and accessibility requirements that govern your project...", default: "", example: REG_DEFAULT },
@@ -102,46 +104,22 @@ export default function CombinedDocumentGenerator() {
 
   function buildFullReportText() {
     let lines = ["SITE ANALYSIS AND OPPORTUNITIES ASSESSMENT", "MVP/Prototype compilation", ""];
-    SECTIONS.forEach((s) => lines.push(s.label.toUpperCase(), inputs[s.id] || "(not provided)", ""));
+    SECTIONS.forEach((sec) => lines.push(sec.label.toUpperCase(), inputs[sec.id] || "(not provided)", ""));
     if (result) {
-      lines.push("7. CONSOLIDATED CONSTRAINTS & OPPORTUNITIES MATRIX");
-      (result.matrix || []).forEach((m) => lines.push(`  [${m.theme}] Constraint: ${m.constraint} | Opportunity: ${m.opportunity}`));
-      lines.push("", "8. DESIGN IMPLICATIONS SUMMARY");
+      lines.push("7. CONSOLIDATED CONSTRAINTS & OPPORTUNITIES MATRIX", "");
+      (result.matrix || []).forEach((m) => {
+        lines.push(`THEME: ${m.theme}`);
+        lines.push(`  Constraint: ${m.constraint}`);
+        lines.push(`  Opportunity: ${m.opportunity}`);
+        lines.push("");
+      });
+      lines.push("8. DESIGN IMPLICATIONS SUMMARY", "");
       (result.design_implications || []).forEach((d) => lines.push(`  - ${d}`));
-      lines.push("", "CONCEPT GENERATOR BRIEF (ready to paste)", result.concept_brief || "");
+      lines.push("", "9. CONCEPT GENERATOR BRIEF (ready to paste)", "", result.concept_brief || "");
     }
     return lines.join("\n");
   }
 
-
-  // --- Structured 11-section report export (see utils/reportTemplate.js) ---
-  const [overflowText, setOverflowText] = useState("");
-  function structuredOpts() {
-    return {
-      toolCode: "CMB",
-      meta,
-      inputRecord: SECTIONS.map((s)=>({label:s.label,value:(inputs[s.id]||"(not provided)").slice(0,200)})),
-      findings: [{ title: "Analysis output", text: buildFullReportText() }],
-      chartNote: result ? "Constraints and opportunities matrix is reproduced in the PDF export." : "No synthesis generated yet.",
-      chartsHtml: result
-        ? tableHTML(["Theme", "Constraint", "Opportunity"],
-            (result.matrix || []).map((m) => [m.theme, m.constraint, m.opportunity]), "Constraints and opportunities matrix")
-        : "",
-      interpretation: (result?.design_implications || []).join(" "),
-      conclusions: (result?.design_implications || []),
-      runLimitations: [],
-      extraRefs: [],
-      overflow: overflowText,
-    };
-  }
-  async function withOverflow(run) {
-    if (!overflowText && apiKey) {
-      const o = await generateOverflow({ provider, apiKey, toolCode: "CMB",
-        reportText: buildFullReportText() });
-      setOverflowText(o);
-      run({ ...structuredOpts(), overflow: o });
-    } else run(structuredOpts());
-  }
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Section", "Content"], ...SECTIONS.map((s) => [s.label, inputs[s.id] || ""])]), "Sections 1-6");
@@ -227,6 +205,19 @@ export default function CombinedDocumentGenerator() {
           </div>
         </>
       )}
+
+      <ReportPreview
+
+        reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+
+        chartsHtml={structuredOpts().chartsHtml}
+
+        includeOverflow={includeOverflow}
+
+        setIncludeOverflow={setIncludeOverflow}
+
+      />
+
 
       <div className="card p-4">
         <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Full Report</h3>

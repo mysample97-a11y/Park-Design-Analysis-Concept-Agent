@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Sparkles, Leaf, Info, Mountain, AlertTriangle, ImageIcon, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { friendlyError, extractJSON, fileToBase64 } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const MAX_IMAGES = 5;
@@ -33,6 +34,7 @@ export default function VegetationAnalyzer() {
   const [researchNote, setResearchNote] = useState("");
   const [researchError, setResearchError] = useState("");
   const [terrainNote, setTerrainNote] = useState("");
+  const [photoNotes, setPhotoNotes] = useState("");
 
   async function researchPalette() {
     if (!location.trim()) { setResearchError("Enter a project location first."); return; }
@@ -71,7 +73,7 @@ export default function VegetationAnalyzer() {
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 1000,
-        content: "Extract a structured inventory of EXISTING vegetation from these landscape architect site-visit notes/photo descriptions - only plants that are CURRENTLY on site right now, not suggestions for the future. For each distinct plant/tree mentioned, output: name, estimated_count (number or 'several'/'unclear'), condition (Healthy/Fair/Poor/Unclear), recommendation (Retain/Remove/Relocate/Assess further), notes (brief). If no existing vegetation is described (e.g. the text is only a general site description with no plants mentioned), return an empty array. Respond with ONLY a valid JSON array, no markdown, no prose.\n\nNOTES:\n" + siteContext,
+        content: "Extract a structured inventory of EXISTING vegetation from these landscape architect site-visit notes/photo descriptions - only plants that are CURRENTLY on site right now, not suggestions for the future. For each distinct plant/tree mentioned, output: name, estimated_count (number or 'several'/'unclear'), condition (Healthy/Fair/Poor/Unclear), recommendation (Retain/Remove/Relocate/Assess further), notes (brief). If no existing vegetation is described (e.g. the text is only a general site description with no plants mentioned), return an empty array. Respond with ONLY a valid JSON array, no markdown, no prose.\n\nNOTES:\n" + (siteContext + (photoNotes ? "\n\nPHOTO OBSERVATIONS (AI-generated from uploaded site photos):\n" + photoNotes : "")),
       });
       const start = text.indexOf("["); const end = text.lastIndexOf("]");
       if (start === -1 || end === -1) throw new Error("Could not find a JSON list in the AI's response.");
@@ -104,7 +106,7 @@ export default function VegetationAnalyzer() {
         content: contentBlocks,
       });
       if (!text) throw new Error("empty description");
-      setSiteContext((prev) => (prev ? prev + "\n\n" : "") + text);
+      setPhotoNotes((prev) => (prev ? prev + "\n\n" : "") + text);
     } catch (err) {
       setImageError((imageError ? imageError + " " : "") + friendlyError(err.message) + " (Technical: " + err.message + ")");
     } finally {
@@ -119,7 +121,7 @@ export default function VegetationAnalyzer() {
       site: location || meta?.siteDescription || meta?.projectName || "(location not stated)",
       terrain_reference: terrainNote || "No survey-grade terrain data supplied. Terrain characteristics should be confirmed against site survey before reliance.",
       soil_reference: "No public dataset available for this site - unverified assumption until geotechnical data is sourced.",
-      user_provided_site_context: siteContext || "None provided.",
+      user_provided_site_context: siteContext + (photoNotes ? "\n\nPHOTO OBSERVATIONS:\n" + photoNotes : "") || "None provided.",
       existing_vegetation_inventory: inventory || "Not structured yet.",
       general_reference_palette: PLANT_PALETTE.map((p) => ({ name: p.name, water: p.water, shade: p.shade, origin: p.origin })),
     };
@@ -158,6 +160,7 @@ export default function VegetationAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
       toolCode: "VEG",
@@ -175,7 +178,7 @@ export default function VegetationAnalyzer() {
     };
   }
   async function withOverflow(run) {
-    if (!overflowText && apiKey) {
+    if (includeOverflow && !overflowText && apiKey) {
       const o = await generateOverflow({ provider, apiKey, toolCode: "VEG",
         reportText: buildReportText() });
       setOverflowText(o);

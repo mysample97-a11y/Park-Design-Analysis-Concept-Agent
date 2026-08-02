@@ -156,11 +156,56 @@ export function downloadFile(content, filename, type = "text/plain") {
 
 /** RTF (Word-openable) builder from plain text */
 export function buildRTF(plainText) {
-  const body = (plainText || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\par ");
-  return `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}\\f0\\fs22 ${body}}`;
+  const esc = (t) => String(t || "").replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}")
+    .replace(/[\u0080-\uFFFF]/g, (c) => "\\u" + c.charCodeAt(0) + "?");
+  const lines = String(plainText || "").split("\n");
+  let out = "";
+  let inTable = false;
+  for (let raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    const trimmed = line.trim();
+    // pipe-delimited row -> real RTF table row
+    if (trimmed.includes(" | ") && trimmed.split("|").length > 2) {
+      const cells = trimmed.split("|").map((c) => c.trim());
+      const w = Math.floor(9000 / cells.length);
+      let bounds = "";
+      for (let i = 1; i <= cells.length; i++) bounds += "\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx" + (w * i);
+      out += "\\trowd\\trgaph80" + bounds;
+      cells.forEach((c) => { out += "\\intbl\\fs18 " + esc(c) + "\\cell"; });
+      out += "\\row\n";
+      inTable = true;
+      continue;
+    }
+    if (inTable) { out += "\\pard\\par\n"; inTable = false; }
+    if (!trimmed) { out += "\\par\n"; continue; }
+    // [n] SECTION HEADING
+    if (/^\[\d+\]/.test(trimmed) || /^APPENDIX/.test(trimmed)) {
+      out += "\\pard\\sa120\\sb180\\b\\fs24\\cf1 " + esc(trimmed) + "\\b0\\fs22\\cf0\\par\n";
+      continue;
+    }
+    // ALL-CAPS title line
+    if (/^[A-Z][A-Z0-9 &,\-\/\.()]{6,}$/.test(trimmed)) {
+      out += "\\pard\\sa100\\sb160\\b\\fs26 " + esc(trimmed) + "\\b0\\fs22\\par\n";
+      continue;
+    }
+    // bullet
+    if (/^[-*]\s/.test(trimmed)) {
+      out += "\\pard\\li600\\fi-200 \\bullet  " + esc(trimmed.replace(/^[-*]\s*/, "")) + "\\par\n";
+      continue;
+    }
+    // Label: value  -> bold the label
+    const kv = trimmed.match(/^([A-Za-z][A-Za-z0-9 &\/'\-]{2,38}):\s*(.*)$/);
+    if (kv && kv[2]) {
+      const indent = raw.match(/^\s*/)[0].length >= 4 ? 600 : 300;
+      out += "\\pard\\li" + indent + " \\b " + esc(kv[1]) + ":\\b0  " + esc(kv[2]) + "\\par\n";
+      continue;
+    }
+    const indent = raw.match(/^\s*/)[0].length >= 4 ? 600 : (raw.match(/^\s*/)[0].length >= 2 ? 300 : 0);
+    out += "\\pard\\li" + indent + " " + esc(trimmed) + "\\par\n";
+  }
+  return "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Calibri;}}{\\colortbl;\\red28\\green35\\blue51;}\\f0\\fs22\n" + out + "}";
 }
 
-/** Opens a print-to-PDF window with given HTML */
 export function printHTML(html, onBlocked) {
   const win = window.open("", "_blank");
   if (!win) { if (onBlocked) onBlocked(); return; }

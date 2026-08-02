@@ -4,7 +4,8 @@ import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef } from "../utils/reportTemplate";
+import ReportPreview from "../components/ReportPreview";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport } from "../utils/reportTemplate";
 
 const BTN_DARK = { backgroundColor: "#1C2333", color: "#FFFFFF" };
 const BTN_GOLD = { backgroundColor: "#C9A46A", color: "#1C2333" };
@@ -195,6 +196,7 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
       toolCode: "SCX",
@@ -210,7 +212,7 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
     };
   }
   async function withOverflow(run) {
-    if (!overflowText && apiKey) {
+    if (includeOverflow && !overflowText && apiKey) {
       const o = await generateOverflow({ provider, apiKey, toolCode: "SCX",
         reportText: buildReportText() });
       setOverflowText(o);

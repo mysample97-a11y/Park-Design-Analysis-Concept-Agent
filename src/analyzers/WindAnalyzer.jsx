@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Sparkles, Plus, Trash2, Wind, AlertTriangle, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DEFAULT_SEASONS = [
@@ -35,8 +36,15 @@ export default function WindAnalyzer() {
         content: `For the location "${location}", give the prevailing seasonal wind characteristics. Respond with ONLY a JSON array of 4 season objects, no markdown fences: [{"id":"winter","label":"Winter (months)","prevailing":"compass direction","speedRange":"x-y km/h","character":"one sentence","dustRisk":"Low|Medium|High"}]. Use the four seasons appropriate to that location's climate. Base this on published climate references; do not invent precise wind-rose percentages.`,
       });
       const parsed = extractJSON(text);
-      if (!Array.isArray(parsed) || !parsed.length) throw new Error("Unexpected format");
-      setSeasons(parsed);
+      if (!Array.isArray(parsed) || !parsed.length) {
+        throw new Error("The AI did not return seasonal wind data in the expected list format for this location. The built-in reference remains in use - you can still run the analysis, but treat the wind data as generic rather than location-specific.");
+      }
+      const cleaned = parsed.filter((x) => x && (x.label || x.id)).map((x, i) => ({
+        id: x.id || `s${i}`, label: x.label || x.id || `Season ${i + 1}`,
+        prevailing: x.prevailing || "not stated", speedRange: x.speedRange || x.speed || "not stated",
+        character: x.character || "", dustRisk: x.dustRisk || "Unknown",
+      }));
+      setSeasons(cleaned);
       setResearchNote(`Wind reference researched for: ${location}`);
     } catch (e) {
       setResearchError(e.message || "Could not research this location. The default reference remains in use.");
@@ -100,6 +108,7 @@ export default function WindAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
       toolCode: "WND",
@@ -117,7 +126,7 @@ export default function WindAnalyzer() {
     };
   }
   async function withOverflow(run) {
-    if (!overflowText && apiKey) {
+    if (includeOverflow && !overflowText && apiKey) {
       const o = await generateOverflow({ provider, apiKey, toolCode: "WND",
         reportText: buildReportText() });
       setOverflowText(o);

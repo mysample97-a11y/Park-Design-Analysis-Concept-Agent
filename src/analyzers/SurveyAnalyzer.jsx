@@ -3,10 +3,12 @@ import { Sparkles, BarChart3, AlertTriangle, Info, Upload, Image as ImageIcon, C
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import ReportPreview from "../components/ReportPreview";
+import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { friendlyError, extractJSON, fileToBase64 } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport } from "../utils/reportTemplate";
 
 const COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B", "#8A6A3A", "#5A5445", "#7FBF9E", "#E08A6A"];
 
@@ -94,14 +96,34 @@ export default function SurveyAnalyzer() {
     setParsed({ responseCount: table.rows.length, columns, rawHeaders: table.headers, rawRows: table.rows });
   }
 
-  function handleFileUpload(e) {
+  async function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
     setParseError("");
-    const reader = new FileReader();
-    reader.onload = (evt) => setRaw(evt.target.result);
-    reader.readAsText(file);
-    e.target.value = "";
+    const name = (file.name || "").toLowerCase();
+    try {
+      if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".xlsm")) {
+        // Spreadsheets are compressed binary - they MUST be parsed, never read as text.
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheetName = wb.SheetNames[0];
+        if (!sheetName) throw new Error("This workbook has no sheets.");
+        const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]);
+        if (!csv.trim()) throw new Error("The first sheet appears to be empty.");
+        setRaw(csv);
+        if (wb.SheetNames.length > 1) {
+          setParseError(`Note: this workbook has ${wb.SheetNames.length} sheets - only the first ("${sheetName}") was read.`);
+        }
+      } else if (name.endsWith(".csv") || name.endsWith(".txt") || name.endsWith(".tsv")) {
+        setRaw(await file.text());
+      } else {
+        throw new Error("Unsupported file type. Use .xlsx, .xls, .csv, .tsv or .txt - other formats cannot be read as survey data.");
+      }
+    } catch (err) {
+      setParseError(err.message || "Could not read this file.");
+    } finally {
+      e.target.value = "";
+    }
   }
 
   async function handleImageUpload(e) {
@@ -181,6 +203,7 @@ export default function SurveyAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
       toolCode: "SUR",
@@ -196,7 +219,7 @@ export default function SurveyAnalyzer() {
     };
   }
   async function withOverflow(run) {
-    if (!overflowText && apiKey) {
+    if (includeOverflow && !overflowText && apiKey) {
       const o = await generateOverflow({ provider, apiKey, toolCode: "SUR",
         reportText: buildPlainText() });
       setOverflowText(o);
@@ -237,8 +260,8 @@ export default function SurveyAnalyzer() {
           <p className="text-xs text-brand-text/60 text-center pt-2 border-t border-[#F0EBDF]">- or, on desktop/browser -</p>
           <div className="flex flex-wrap gap-3">
             <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
-              <Upload size={15} /> Upload CSV File
-              <input type="file" accept=".csv,.txt" onChange={handleFileUpload} className="sr-only" />
+              <Upload size={15} /> Upload CSV / Excel File
+              <input type="file" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt" onChange={handleFileUpload} className="sr-only" />
             </label>
             <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff", opacity: imageLoading ? 0.4 : 1, pointerEvents: imageLoading ? "none" : "auto" }}>
               <ImageIcon size={15} /> {imageLoading ? "Reading image..." : "Upload Image / Screenshot"}
