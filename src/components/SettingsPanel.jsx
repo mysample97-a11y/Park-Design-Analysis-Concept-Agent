@@ -131,7 +131,7 @@ export default function SettingsPanel({ keys, models, meta, saveKey, saveModel, 
           <div className="grid sm:grid-cols-2 gap-2">
             <label className="text-[10px] text-brand-text">
               Project name
-              <input type="text" value={meta?.projectName || ""} placeholder="e.g. Al Safa 2 Park Redesign"
+              <input type="text" value={meta?.projectName || ""} placeholder="e.g. Riverside Park Redesign"
                 onChange={(e) => saveMeta({ projectName: e.target.value })} className="input text-xs mt-0.5" />
             </label>
             <label className="text-[10px] text-brand-text">
@@ -142,7 +142,7 @@ export default function SettingsPanel({ keys, models, meta, saveKey, saveModel, 
             </label>
             <label className="text-[10px] text-brand-text">
               Site description
-              <input type="text" value={meta?.siteDescription || ""} placeholder="e.g. Jumeirah, Dubai - 15,000 sqm"
+              <input type="text" value={meta?.siteDescription || ""} placeholder="e.g. Chicago, USA - 15,000 sqm"
                 onChange={(e) => saveMeta({ siteDescription: e.target.value })} className="input text-xs mt-0.5" />
             </label>
             <label className="text-[10px] text-brand-text">

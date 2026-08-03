@@ -355,7 +355,7 @@ export default function SolarAnalyzer() {
       <div className="card">
         <div className="card-header">Step 1 — Project Location</div>
         <div className="p-4 space-y-3">
-          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai" className="input" />
+          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Riverside Park, Chicago, USA" className="input" />
           <button onClick={resolveLocation} disabled={siteLoading || !apiKey} className="btn-gold w-full">
             <Search size={18} /> {siteLoading ? "Finding coordinates..." : "Set Location & Compute Sun Path"}
           </button>

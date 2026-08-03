@@ -82,13 +82,38 @@ export default function SiteContextAnalyzer() {
         blocks.push({ type: "image", source: { type: "base64", media_type: f.type || "image/png", data: b64 } });
       }
       blocks.push({ type: "text", text: "These are site/GIS/map images for a park design project. Describe what surrounds the site on each edge - adjacent land uses, roads, buildings, transit, open space. Note anything relevant to arrival, access or noise. Write plain factual observations, no speculation." });
-      const text = await callAI({ provider, apiKey, maxTokens: 2500, content: SITE_PROMPT + "\n\nLOCATION: " + location + "\nDESCRIPTION: " + (siteDescription || "(none)") + (imageNotes ? "\n\nIMAGE INTERPRETATION:\n" + imageNotes : "") + "\n\nZONES: " + JSON.stringify(zones.filter((z) => z.name.trim())) + "\nPATHS: " + JSON.stringify(paths.filter((pa) => pa.name.trim())),
-      });
-
-      if (!resText) throw new Error("The AI returned an empty response.");
-      setContext(extractJSON(resText));
+      const text = await callAI({ provider, apiKey, maxTokens: 2500, content: blocks });
+      if (!text) throw new Error("The AI returned no description for these images.");
+      setImageNotes((prev) => (prev ? prev + "\n\n" : "") + text);
     } catch (e) {
-      setContextError(e.message || "Something went wrong analyzing the site. Try again.");
+      setContextError(e.message || "Could not read these images.");
+    } finally {
+      setImageLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function analyzeSiteContext() {
+    if (!location.trim() && !siteDescription.trim() && !imageNotes) {
+      setContextError("Give the tool a location, a description, or an uploaded map before analysing.");
+      return;
+    }
+    setContextLoading(true); setContextError("");
+    try {
+      const resText = await callAI({
+        provider, apiKey, maxTokens: 4000, useWebSearch: provider === "claude",
+        content: SITE_PROMPT +
+          "\n\nLOCATION: " + (location || "(not stated)") +
+          "\nDESCRIPTION: " + (siteDescription || "(none)") +
+          (imageNotes ? "\n\nIMAGE INTERPRETATION:\n" + imageNotes : ""),
+      });
+      if (!resText) throw new Error("The AI returned an empty response.");
+      const parsed = extractJSON(resText);
+      if (!parsed) throw new Error("The AI's reply could not be read as structured data. Try again.");
+      setContext(parsed);
+      setInsight(parsed);
+    } catch (e) {
+      setContextError(e.message || "Something went wrong analysing the site. Try again.");
     } finally {
       setContextLoading(false);
     }
@@ -255,10 +280,10 @@ export default function SiteContextAnalyzer() {
         <div className="bg-white rounded-lg border-2 border-[#E8E2D5] overflow-hidden">
           <div className="px-4 py-3 border-b border-[#E8E2D5] bg-[#FBF7EE]"><h2 className="font-bold text-sm uppercase tracking-wide">Step 1 - Describe Your Site</h2></div>
           <div className="p-4 space-y-3">
-            <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Project location (e.g. Al Safa 2 Park, Jumeirah, Dubai)" className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-2.5 focus:border-[#C9A46A] outline-none" />
+            <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Project location (e.g. Riverside Park, Chicago, USA)" className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-2.5 focus:border-[#C9A46A] outline-none" />
             <textarea value={siteDescription} onChange={(e) => setSiteDescription(e.target.value)} placeholder="Describe what's around the site (adjacent buildings, roads, land uses) - or upload a GIS/map image below instead" rows={4} className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-3 focus:border-[#C9A46A] outline-none resize-y" />
             <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
-              <ImageIcon size={15} /> {imagePreviewName || "Upload Site/GIS Map Image (optional)"}
+              <ImageIcon size={15} /> {imageLoading ? "Reading images..." : "Upload Site / GIS Map Images (up to 4, optional)"}
               <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="sr-only" />
             </label>
             {imageNotes && (

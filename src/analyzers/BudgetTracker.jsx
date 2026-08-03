@@ -277,7 +277,7 @@ export default function BudgetTracker() {
           <div className="grid sm:grid-cols-3 gap-2">
             <div>
               <label className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Project location</label>
-              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Dubai, UAE" className="input text-xs mt-0.5" />
+              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Chicago, USA" className="input text-xs mt-0.5" />
             </div>
             <div>
               <label className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Currency</label>

@@ -10,12 +10,15 @@ import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 
-const REG_DEFAULT = `Governing Standards: Dubai Universal Design Code (max ramp gradient 8%/1:12, min ramp width 1.0m, min crossing width 2.0m, max cross-fall 2%, max ramp run 10m, handrails above 0.5m level change); UAE Federal Law No. 29 of 2006 (Rights of People of Determination); Neighborhood Parks Manual (peak capacity 150-400 visitors/10,000sqm by density band, 15% leasable/commercial area target).
+// EXAMPLE CONTENT ONLY - a worked sample from one project, offered behind a 'Load worked example'
+// link so users can see the expected level of detail. Never pre-filled.
+const REG_DEFAULT = `[EXAMPLE - replace with your own project's standards] Governing Standards: Dubai Universal Design Code (max ramp gradient 8%/1:12, min ramp width 1.0m, min crossing width 2.0m, max cross-fall 2%, max ramp run 10m, handrails above 0.5m level change); UAE Federal Law No. 29 of 2006 (Rights of People of Determination); Neighborhood Parks Manual (peak capacity 150-400 visitors/10,000sqm by density band, 15% leasable/commercial area target).
 Compliance method: every path/ramp/crossing checked programmatically against these standards, tagged Pass/Needs Review/Pending.
 Limitation: gradient not verifiable without real site elevation data; terrain assumed flat (Dubai coastal, ~2m ASL) pending DWG confirmation.
 Commercial & Service Facilities Map required per Schedule 1(E), tracked as a mandatory deliverable.`;
 
-const PRECEDENT_DEFAULT = `Al Safa Park 1 (direct sister-park precedent, redesigned for the same Dubai Canal reason): post-occupancy evaluation found family-only parking, signed pedestrian walkways, pocket-park green buffers, nighttime pedestrian lighting, strict pedestrian/cyclist separation, and maintained natural landscaping drove visitor satisfaction.
+// EXAMPLE CONTENT ONLY - see note above.
+const PRECEDENT_DEFAULT = `[EXAMPLE - replace with your own precedents] Al Safa Park 1 (direct sister-park precedent, redesigned for the same Dubai Canal reason): post-occupancy evaluation found family-only parking, signed pedestrian walkways, pocket-park green buffers, nighttime pedestrian lighting, strict pedestrian/cyclist separation, and maintained natural landscaping drove visitor satisfaction.
 Al Khazan Park (nearby Dubai Municipality redevelopment): fully solar-powered, identity-themed - confirms full solar power is an executed Dubai precedent.
 Vancouver Convention Centre West: on-site biomembrane reactor treats 100% of building wastewater, supplies ~80% of greywater needs and irrigates its living roof, ~68% of total water use reclaimed - real source for the elevated pavilion's greywater-fed planting concept, adapted at park scale.
 Note: precedents cited for design logic, not scale-equivalent replication.`;
@@ -213,7 +216,7 @@ export default function CombinedDocumentGenerator() {
                 {s.example && !inputs[s.id] && (
                   <button onClick={() => updateInput(s.id, s.example)}
                     className="text-[10px] font-medium text-brand-text/70 hover:underline">
-                    Load example
+                    Load worked example
                   </button>
                 )}
                 <label className="text-[10px] font-medium text-brand-gold flex items-center gap-1 cursor-pointer hover:underline">

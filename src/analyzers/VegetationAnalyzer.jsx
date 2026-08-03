@@ -11,20 +11,6 @@ import * as XLSX from "xlsx";
 
 const MAX_IMAGES = 5;
 
-const DEFAULT_PALETTE = [
-  { id: "ghaf", name: "Ghaf (Prosopis cineraria)", type: "Canopy Tree", water: "Low", shade: "Full Sun", origin: "Native - UAE national tree" },
-  { id: "sidr", name: "Sidr (Ziziphus spina-christi)", type: "Canopy Tree", water: "Low", shade: "Full Sun", origin: "Native" },
-  { id: "samar", name: "Samar (Acacia tortilis)", type: "Canopy Tree", water: "Low", shade: "Full Sun", origin: "Native" },
-  { id: "neem", name: "Neem (Azadirachta indica)", type: "Canopy Tree", water: "Medium", shade: "Full Sun", origin: "Naturalized/Ornamental" },
-  { id: "datepalm", name: "Date Palm (Phoenix dactylifera)", type: "Palm", water: "Low", shade: "Full Sun", origin: "Native/Cultural" },
-  { id: "dwarfpalm", name: "Dwarf Palm (Nannorrhops ritchieana)", type: "Palm", water: "Low", shade: "Full Sun", origin: "Native" },
-  { id: "bougainvillea", name: "Bougainvillea", type: "Shrub/Accent", water: "Low", shade: "Full Sun", origin: "Regionally-adapted" },
-  { id: "lantana", name: "Lantana", type: "Shrub", water: "Low", shade: "Full Sun", origin: "Regionally-adapted" },
-  { id: "sodomsapple", name: "Sodom's Apple (Calotropis procera)", type: "Shrub", water: "Low", shade: "Full Sun", origin: "Native" },
-  { id: "agave", name: "Agave / Aloe Vera", type: "Groundcover/Succulent", water: "Low", shade: "Full Sun", origin: "Regionally-adapted" },
-  { id: "frangipani", name: "Frangipani", type: "Accent (use sparingly)", water: "High", shade: "Part Shade", origin: "Tropical-Ornamental" },
-  { id: "strelitzia", name: "Strelitzia (Bird of Paradise)", type: "Accent (use sparingly)", water: "High", shade: "Part Shade", origin: "Tropical-Ornamental" },
-];
 
 export default function VegetationAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
@@ -203,7 +189,7 @@ export default function VegetationAnalyzer() {
         <div className="card-header">Project Location - Planting Palette</div>
         <div className="p-4 space-y-2">
           <input value={location} onChange={(e) => setLocation(e.target.value)}
-            placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai"
+            placeholder="e.g. Riverside Park, Chicago, USA"
             className="input" />
           <button onClick={researchPalette} disabled={researching || !apiKey} className="btn-gold w-full">
             {researching ? "Researching..." : "Research Planting Palette for This Location"}
@@ -224,7 +210,7 @@ export default function VegetationAnalyzer() {
           <textarea
             value={siteContext}
             onChange={(e) => setSiteContext(e.target.value)}
-            placeholder="e.g. Several mature date palms along west boundary, appear healthy. Ghaf tree near central plaza, large canopy, good condition. Site is exposed to full sun most of the day, no existing shade structures..."
+            placeholder="e.g. Several mature shade trees along the west boundary, appear healthy. Large specimen tree near the central plaza, good condition. Site is exposed to full sun most of the day, no existing shade structures..."
             rows={6}
             className="textarea"
           />

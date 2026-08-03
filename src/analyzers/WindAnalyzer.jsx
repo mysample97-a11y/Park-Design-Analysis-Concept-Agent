@@ -9,12 +9,6 @@ import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, windRoseSVG } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
-const DEFAULT_SEASONS = [
-  { id: "winter", label: "Winter (Dec-Feb)", prevailing: "NW", speedRange: "10-25 km/h", character: "Cooler season. Generally calmer, with occasional rain-bearing systems arriving from the northwest.", dustRisk: "Low" },
-  { id: "spring", label: "Spring (Feb-Apr)", prevailing: "NW, variable", speedRange: "15-40 km/h", character: "Strongest and most variable winds of the year. Can raise sand and dust storms.", dustRisk: "High" },
-  { id: "summer", label: "Summer (May-Sep)", prevailing: 'NW ("Shamal")', speedRange: "10-30 km/h", character: "Persistent northwesterly Shamal wind, often carrying Gulf moisture. A real passive-cooling opportunity if not blocked.", dustRisk: "Medium" },
-  { id: "autumn", label: "Autumn (Oct-Nov)", prevailing: "NW, transitional", speedRange: "10-20 km/h", character: "Milder, transitional period between summer Shamal and winter patterns.", dustRisk: "Low" },
-];
 
 const RISK_COLOR = { Low: "#3D7A5C", Medium: "#B8863B", High: "#B84C3D" };
 
@@ -215,7 +209,7 @@ export default function WindAnalyzer() {
         <div className="card-header">Project Location - Wind Reference</div>
         <div className="p-4 space-y-2">
           <input value={location} onChange={(e) => setLocation(e.target.value)}
-            placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai"
+            placeholder="e.g. Riverside Park, Chicago, USA"
             className="input" />
           <button onClick={researchLocation} disabled={researching || !apiKey} className="btn-gold w-full">
             {researching ? "Researching wind data..." : "Research Wind Data for This Location"}
