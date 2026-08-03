@@ -7,7 +7,7 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, formatNumber, stripRTF } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
@@ -66,6 +66,37 @@ export default function BudgetTracker() {
     } finally {
       setDetecting(false);
     }
+  }
+
+  // ---- Multi-concept comparison ----
+  const [conceptTexts, setConceptTexts] = useState(["", "", ""]);
+  const [comparison, setComparison] = useState(null);
+  const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState("");
+
+  async function compareConcepts() {
+    const filled = conceptTexts.map((t, i) => ({ i, t })).filter((x) => x.t.trim());
+    if (filled.length < 2) { setCompareError("Paste at least two concepts to compare."); return; }
+    setComparing(true); setCompareError(""); setComparison(null);
+    try {
+      const text = await callAI({
+        provider, apiKey, maxTokens: 3000, useWebSearch: provider === "claude",
+        content: "You are a cost consultant comparing park design concepts for affordability. For EACH concept, extract its facilities and areas, apply indicative construction unit rates for the stated location, and build an order-of-cost estimate using the RICS NRM1 cascade (measured works, then preliminaries, overheads and profit, contingency, inflation). " +
+          "Then compare them. Return ONLY valid JSON, no markdown fences: {" +
+          "\"concepts\":[{\"name\":\"\",\"estimated_capex\":0,\"largest_cost_driver\":\"the single facility contributing most\",\"driver_share_pct\":0,\"within_budget\":true,\"confidence\":\"Verified-Macro|Verified-Adjacent-Scale|Assumption-Flagged\"}]," +
+          "\"recommended\":\"name of the best-value concept\",\"recommendation_reason\":\"2-3 sentences on value for money, not just lowest cost\"," +
+          "\"cost_reduction_options\":[{\"concept\":\"\",\"facility\":\"\",\"action\":\"reduce, substitute or combine - and the approximate saving\"}]," +
+          "\"hybrid_suggestion\":\"if elements of different concepts could be combined for better value, say how - otherwise empty string\"}. " +
+          "Mark every rate you could not source against a published benchmark as Assumption-Flagged. Do not present invented figures as verified.\n\n" +
+          `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\n` +
+          filled.map((x) => `CONCEPT ${x.i + 1}:\n${x.t}`).join("\n\n---\n\n"),
+      });
+      const parsed = extractJSON(text);
+      if (!parsed || !parsed.concepts) throw new Error("The AI did not return a comparison in the expected format. Try again.");
+      setComparison(parsed);
+    } catch (e) {
+      setCompareError(e.message || "Could not compare concepts.");
+    } finally { setComparing(false); }
   }
 
   async function researchRates() {
@@ -186,7 +217,16 @@ export default function BudgetTracker() {
       toolCode: "BDG",
       meta,
       inputRecord: [{label:"Facilities entered",value:String(facilities.filter((f)=>f.name.trim()).length)},{label:"Rate assumptions",value:Object.entries(rates).map(([k,r])=>`${k} ${r.pct}% (${r.confidence})`).join("; ")}],
-      findings: [{ title: "Analysis output", text: buildReportText() }],
+      findings: [
+        { title: "Facility schedule", headers: ["Facility", "Area m2", `Rate ${currency}/m2`, "Subtotal", "Rate basis"],
+          rows: facilities.filter((f) => f.name.trim()).map((f) => [f.name, f.area, f.rate, formatNumber((Number(f.area)||0)*(Number(f.rate)||0)), f.rateBasis || "user-entered"]) },
+        { title: "Cost build-up (RICS NRM1 cascade)", headers: ["Cost line", "Basis", `Amount ${currency}`, "Confidence"],
+          rows: wrapperRows.map((r) => [r.label, r.detail, formatNumber(r.amount), r.confidence || ""]) },
+        ...(comparison ? [{ title: "Concept cost comparison",
+          note: `Recommended: ${comparison.recommended}. ${comparison.recommendation_reason || ""}`,
+          headers: ["Concept", `Est. CAPEX ${currency}`, "Largest cost driver", "Within budget", "Confidence"],
+          rows: (comparison.concepts || []).map((c) => [c.name, formatNumber(c.estimated_capex), c.largest_cost_driver, c.within_budget ? "Yes" : "No", c.confidence]) }] : []),
+      ],
       chartNote: "Cost build-up chart and facility schedule are reproduced in the PDF export.",
       chartsHtml: tableHTML(["Facility", "Area m2", "Rate", "Subtotal"],
           facilities.filter((f) => f.name.trim()).map((f) => [f.name, f.area, f.rate, formatNumber((Number(f.area)||0)*(Number(f.rate)||0))]),
@@ -208,18 +248,7 @@ export default function BudgetTracker() {
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Facility", "Area m2", "Rate /m2", "Subtotal AED"], ...facilities.filter((f) => f.name.trim()).map((f) => [f.name, Number(f.area) || 0, Number(f.rate) || 0, (Number(f.area) || 0) * (Number(f.rate) || 0)])]), "Facilities");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Cost Line", "Detail", "Amount AED", "Confidence"], ...wrapperRows.map((r) => [r.label, r.detail, Math.round(r.amount), r.confidence || ""])]), "Cost Build-Up");
-    if (insight) {
-      const rows = [["Observations"]];
-      (insight.observations || []).forEach((o) => rows.push([o]));
-      rows.push([], ["Confidence Note", insight.confidence_note], ["Conclusion", insight.conclusion]);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "AI Insight");
-    }
-    downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "budget-estimate.xlsx", "application/octet-stream");
-  }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
     withOverflow((o) => exportStructuredPDF(o, () => {
@@ -378,6 +407,59 @@ export default function BudgetTracker() {
 
       />
 
+
+      <div className="card">
+        <div className="card-header">Compare Concepts (optional)</div>
+        <div className="p-4 space-y-3">
+          <p className="text-[11px] text-brand-text">
+            Paste two or three concepts from the Concept Generator (its report lists facilities and areas per zone).
+            Each is costed separately, then compared on value for money - not simply lowest cost.
+          </p>
+          {conceptTexts.map((t, i) => (
+            <textarea key={i} value={t} rows={3} className="textarea"
+              placeholder={`Concept ${i + 1} - paste its facility schedule / zone list`}
+              onChange={(e) => { const c = [...conceptTexts]; c[i] = e.target.value; setConceptTexts(c); }} />
+          ))}
+          <button onClick={compareConcepts} disabled={comparing || !apiKey} className="btn-dark w-full">
+            <Sparkles size={15} /> {comparing ? "Comparing concepts..." : "Compare Concepts & Recommend Best Value"}
+          </button>
+          {compareError && <p className="text-xs text-brand-danger">{friendlyError(compareError)}</p>}
+          {comparison && (
+            <div className="space-y-3">
+              <table className="w-full text-xs">
+                <thead><tr className="text-left text-brand-text/60 border-b border-brand-border">
+                  <th className="py-2 pr-2">Concept</th><th className="py-2 pr-2">Est. CAPEX</th>
+                  <th className="py-2 pr-2">Largest cost driver</th><th className="py-2 pr-2">Within budget</th><th className="py-2">Confidence</th>
+                </tr></thead>
+                <tbody>{(comparison.concepts || []).map((c, i) => (
+                  <tr key={i} className="border-b border-brand-border/50">
+                    <td className="py-2 pr-2 font-semibold">{c.name}</td>
+                    <td className="py-2 pr-2 font-mono">{formatNumber(c.estimated_capex)} {currency}</td>
+                    <td className="py-2 pr-2">{c.largest_cost_driver} {c.driver_share_pct ? `(${c.driver_share_pct}%)` : ""}</td>
+                    <td className="py-2 pr-2" style={{ color: c.within_budget ? "#3D7A5C" : "#B84C3D" }}>{c.within_budget ? "Yes" : "No"}</td>
+                    <td className="py-2" style={{ color: CONFIDENCE_COLOR[c.confidence] || "#5A5445" }}>{c.confidence}</td>
+                  </tr>))}
+                </tbody>
+              </table>
+              <div className="rounded-lg border-2 p-3" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
+                <p className="text-sm text-brand-dark"><span className="font-bold">Best value: {comparison.recommended}</span></p>
+                <p className="text-xs text-brand-dark mt-1">{comparison.recommendation_reason}</p>
+              </div>
+              {(comparison.cost_reduction_options || []).length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-brand-text uppercase tracking-wide mb-1">Cost reduction options</p>
+                  {comparison.cost_reduction_options.map((o, i) => (
+                    <p key={i} className="text-[11px] text-brand-dark">- <span className="font-semibold">{o.concept} / {o.facility}:</span> {o.action}</p>
+                  ))}
+                </div>
+              )}
+              {comparison.hybrid_suggestion && (
+                <p className="text-[11px] text-brand-success"><span className="font-semibold">Hybrid option:</span> {comparison.hybrid_suggestion}</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="card p-4">
         <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h3>

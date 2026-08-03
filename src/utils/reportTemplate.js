@@ -304,20 +304,38 @@ export function buildStructuredReport({
   L.push("");
 
   L.push("[5] INPUT RECORD");
-  if (inputRecord.length) inputRecord.forEach((i) => L.push(`  ${i.label}: ${i.value}`));
-  else L.push("  (no inputs recorded)");
+  L.push("  Everything supplied by the user for this run, recorded so the result is reproducible.");
+  if (inputRecord.length) {
+    inputRecord.forEach((i) => {
+      const v = String(i.value == null ? "" : i.value);
+      if (v.includes("\n")) {
+        L.push(`  ${i.label}:`);
+        v.split("\n").forEach((ln) => L.push(`      ${ln}`));
+      } else {
+        L.push(`  ${i.label}: ${v}`);
+      }
+    });
+  } else L.push("  (no inputs recorded)");
   L.push("");
 
   L.push("[6] FINDINGS");
   if (findings.length) {
-    findings.forEach((f) => {
-      L.push(`  ${f.title}`);
-      if (f.text) L.push(`    ${f.text}`);
-      if (f.headers) L.push("    " + f.headers.join(" | "));
-      if (f.rows) f.rows.forEach((r) => L.push("    " + r.join(" | ")));
+    findings.forEach((f, fi) => {
+      L.push(`  6.${fi + 1}  ${f.title.toUpperCase()}`);
+      if (f.note) L.push(`       ${f.note}`);
+      if (f.text) {
+        String(f.text).split("\n").forEach((ln) => L.push(`       ${ln}`));
+      }
+      if (f.items && f.items.length) {
+        f.items.forEach((it) => L.push(`       - ${it}`));
+      }
+      if (f.headers && f.rows) {
+        L.push("       " + f.headers.join(" | "));
+        f.rows.forEach((r) => L.push("       " + r.map((c) => String(c == null ? "" : c)).join(" | ")));
+      }
       L.push("");
     });
-  } else L.push("  (no findings generated)");
+  } else L.push("  (no findings generated - run the analysis before exporting)");
   L.push("");
 
   L.push("[7] DATA VISUALISATIONS");
@@ -422,6 +440,53 @@ export async function generateOverflow({ provider, apiKey, toolCode, reportText 
   } catch {
     return ""; // fall back to the default line in the template
   }
+}
+
+/** Excel export of the structured report - one sheet per major section. */
+export function exportStructuredExcel(opts, XLSX) {
+  const spec = TOOL_SPECS[opts.toolCode] || {};
+  const docRef = opts.docRef || nextDocRef(opts.meta?.projectCode, opts.toolCode);
+  const wb = XLSX.utils.book_new();
+  const meta = opts.meta || {};
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Field", "Value"],
+    ["Project", meta.projectName || ""], ["Site", meta.siteDescription || ""],
+    ["Report", spec.name || opts.toolCode], ["Document reference", docRef],
+    ["Date", new Date().toISOString().slice(0, 10)], ["Status", meta.status || "DRAFT"],
+    ["Author", meta.author || ""],
+  ]), "1 Title Block");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Purpose"], [spec.covers || ""], [], ["Does not cover"], [spec.excludes || ""], [],
+    ["Deterministic computation"], ...((spec.deterministic || []).map((d) => [d])), [],
+    ["AI inference"], ...((spec.inferential || []).map((d) => [d])),
+  ]), "3-4 Scope & Method");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Input", "Value"], ...(opts.inputRecord || []).map((i) => [i.label, String(i.value ?? "")]),
+  ]), "5 Input Record");
+  (opts.findings || []).forEach((f, i) => {
+    const rows = [];
+    if (f.note) rows.push([f.note], []);
+    if (f.text) String(f.text).split("\n").forEach((l) => rows.push([l]));
+    if (f.items) f.items.forEach((it) => rows.push([it]));
+    if (f.headers && f.rows) { rows.push(f.headers); f.rows.forEach((r) => rows.push(r)); }
+    const name = `6.${i + 1} ${String(f.title || "Findings").slice(0, 22)}`.replace(/[\\\/\?\*\[\]:]/g, "");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows.length ? rows : [["(no data)"]]), name.slice(0, 31));
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Interpretation"], [opts.interpretation || "(not generated)"], [],
+    ["Conclusions"], ...((opts.conclusions || []).map((c) => [c])),
+  ]), "8-10 Interpretation");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Standing limitations"], ...((spec.limitations || []).map((l) => [l])), [],
+    ["This run"], ...((opts.runLimitations || []).map((l) => [l])),
+  ]), "9 Limitations");
+  const refs = [...(spec.refs || []), ...(opts.extraRefs || [])];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["#", "Source", "Organisation", "Year", "Link"],
+    ...refs.map((r, i) => [`R${i + 1}`, r.t || "", r.o || "", r.y || "", r.u || ""]),
+  ]), "11 References");
+  downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), `${docRef}.xlsx`, "application/octet-stream");
+  return docRef;
 }
 
 /** Word (.rtf) export in the structured 11-section format. */

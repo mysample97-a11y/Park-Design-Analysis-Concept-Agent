@@ -7,7 +7,7 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
 
 const POSITIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "Center"];
 const GRID_ORDER = ["NW", "N", "NE", "W", "Center", "E", "SW", "S", "SE"];
@@ -157,20 +157,7 @@ export default function ConceptGenerator() {
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
-  function exportExcel() {
-    if (!concepts) return;
-    const wb = XLSX.utils.book_new();
-    const summaryRows = [["Concept", ...SCORE_CRITERIA.map((s) => s.label), "Overall"]];
-    concepts.forEach((c) => summaryRows.push([c.name, ...SCORE_CRITERIA.map((s) => c.scores?.[s.id] ?? ""), overallScore(c)]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "Comparison");
-    concepts.forEach((c, i) => {
-      const rows = [["Zone", "Category", "Area %", "Position", "Rationale"]];
-      (c.zones || []).forEach((z) => rows.push([z.name, z.category, z.area_pct, z.position, z.rationale]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), `Concept ${i + 1}`.slice(0, 28));
-    });
-    if (recommendation) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Recommendation", recommendation.recommendation], ["Tradeoffs", recommendation.tradeoffs]]), "Recommendation");
-    downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "concept-generator-output.xlsx", "application/octet-stream");
-  }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
     withOverflow((o) => exportStructuredPDF(o, () => {

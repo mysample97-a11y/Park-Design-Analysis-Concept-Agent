@@ -6,7 +6,7 @@ import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DEFAULT_SEASONS = [
@@ -64,6 +64,42 @@ export default function WindAnalyzer() {
   function updateZone(id, patch) { setZones(zones.map((z) => (z.id === id ? { ...z, ...patch } : z))); }
   function removeZone(id) { setZones(zones.filter((z) => z.id !== id)); }
 
+  // City of Ottawa Wind Analysis Terms of Reference - pedestrian comfort thresholds (km/h)
+  const COMFORT = [
+    { key: "sitting", label: "Sitting", max: 10 },
+    { key: "standing", label: "Standing", max: 14 },
+    { key: "strolling", label: "Strolling", max: 17 },
+    { key: "walking", label: "Walking", max: 20 },
+  ];
+  const SAFETY_LIMIT = 90;
+
+  function parseSpeed(range) {
+    const nums = String(range || "").match(/\d+/g);
+    if (!nums || !nums.length) return null;
+    return Math.max(...nums.map(Number));
+  }
+
+  function comfortRows() {
+    return SEASONS.map((sn) => {
+      const top = parseSpeed(sn.speedRange);
+      const cells = COMFORT.map((c) => (top == null ? "?" : top <= c.max ? "OK" : "EXCEEDS"));
+      const safety = top == null ? "?" : top >= SAFETY_LIMIT ? "HAZARD" : "OK";
+      return [sn.label, sn.speedRange, ...cells, safety];
+    });
+  }
+
+  function comfortSummary() {
+    const problems = [];
+    SEASONS.forEach((sn) => {
+      const top = parseSpeed(sn.speedRange);
+      if (top == null) return;
+      const failed = COMFORT.filter((c) => top > c.max).map((c) => c.label.toLowerCase());
+      if (failed.length) problems.push(`${sn.label}: peak ${top} km/h exceeds the comfort threshold for ${failed.join(", ")}`);
+      if (top >= SAFETY_LIMIT) problems.push(`${sn.label}: peak ${top} km/h reaches the wind safety hazard threshold - mitigation required`);
+    });
+    return problems.length ? problems : ["Peak seasonal speeds fall within the comfort thresholds for all assessed activities."];
+  }
+
   function zoneFlag(z) {
     if (z.wantsCooling && !z.hasScreening) return { label: "Good - open to prevailing NW breeze", color: "#3D7A5C" };
     if (z.wantsCooling && z.hasScreening) return { label: "Review - screening may block wanted cooling", color: "#B8863B" };
@@ -77,12 +113,13 @@ export default function WindAnalyzer() {
       site: location || meta?.siteDescription || meta?.projectName || "(location not stated)",
       wind_reference: SEASONS,
       note: researchNote || "Prevailing direction and speed range are from general published climate references for the stated location. Not precise wind-rose measurement.",
+      comfort_assessment: comfortSummary(),
       zones: zones.filter((z) => z.name.trim()).map((z) => ({ zone: z.name, wants_passive_cooling: z.wantsCooling, has_windbreak_screening: z.hasScreening, assessment: zoneFlag(z).label })),
     };
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 2500,
-        content: "You are a landscape architecture assistant giving wind-design guidance for a park design at the stated location, using only the sourced seasonal wind data and zone list below - no invented statistics. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {
@@ -114,7 +151,31 @@ export default function WindAnalyzer() {
       toolCode: "WND",
       meta,
       inputRecord: [{label:"Location",value:(typeof location!=="undefined"&&location)||"(not stated)"}],
-      findings: [{ title: "Analysis output", text: buildReportText() }],
+      findings: [
+        { title: "Seasonal wind reference", note: researchNote || "Built-in reference data - research the location to replace it.",
+          headers: ["Season", "Prevailing", "Speed", "Dust risk", "Character"],
+          rows: SEASONS.map((sn) => [sn.label, sn.prevailing, sn.speedRange, sn.dustRisk, sn.character]) },
+        { title: "Pedestrian wind comfort assessment", note: "Assessed against City of Ottawa Wind Analysis Terms of Reference criteria.",
+          headers: ["Season", "Speed", "Sitting <=10", "Standing <=14", "Strolling <=17", "Walking <=20", "Safety >=90"],
+          rows: comfortRows() },
+        { title: "Comfort criteria applied", items: [
+          "Sitting (seating areas, patios): max 10 km/h",
+          "Standing (entrances, waiting): max 14 km/h",
+          "Strolling (plazas, parks): max 17 km/h",
+          "Walking (paths, cycle routes): max 20 km/h",
+          "Uncomfortable for most activities: 20 km/h and above - mitigation recommended",
+          "Safety hazard: 90 km/h and above - mitigation required",
+        ] },
+        { title: "Site design mitigation options", items: [
+          "Coniferous tree planting at exposed corners",
+          "Landscape berms across the prevailing vector",
+          "Permeable fences, trellises and privacy screens - filter rather than block",
+          "Large rocks and tall obstacles in the pedestrian realm",
+          "Staggered planting belts to slow and clean air without sealing the site",
+        ] },
+        { title: "Zone assessment", headers: ["Zone", "Wants cooling", "Has screening", "Assessment"],
+          rows: zones.filter((z) => z.name.trim()).map((z) => [z.name, z.wantsCooling ? "Yes" : "No", z.hasScreening ? "Yes" : "No", zoneFlag(z).label]) },
+      ],
       chartNote: "Seasonal wind reference table is reproduced in the PDF export.",
       chartsHtml: tableHTML(["Season", "Prevailing", "Speed", "Dust risk", "Character"],
           SEASONS.map((s) => [s.label, s.prevailing, s.speedRange, s.dustRisk, s.character]), "Seasonal wind reference"),
@@ -133,21 +194,7 @@ export default function WindAnalyzer() {
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Season", "Prevailing", "Speed Range", "Dust Risk", "Character"], ...SEASONS.map((s) => [s.label, s.prevailing, s.speedRange, s.dustRisk, s.character])]), "Seasonal Reference");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Zone", "Wants Cooling", "Has Screening", "Assessment"], ...zones.filter((z) => z.name.trim()).map((z) => [z.name, z.wantsCooling ? "Yes" : "No", z.hasScreening ? "Yes" : "No", zoneFlag(z).label])]), "Zone Assessment");
-    if (insight) {
-      const rows = [["Zone", "Recommendation"]];
-      (insight.zone_recommendations || []).forEach((r) => rows.push([r.zone, r.recommendation]));
-      rows.push([]); rows.push(["Conclusion", insight.conclusion]);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "AI Insight");
-    }
-    const blob = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "al-safa-2-wind-analysis.xlsx";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
 
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 

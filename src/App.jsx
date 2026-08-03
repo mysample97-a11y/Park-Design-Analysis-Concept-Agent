@@ -80,7 +80,7 @@ export default function App() {
         </header>
 
         {showSettings && (
-          <div className="max-w-6xl mx-auto px-6 pt-6">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
             <SettingsPanel
               keys={keys}
               models={models}
@@ -120,8 +120,8 @@ export default function App() {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto px-6 pt-6">
-          <div className="flex flex-wrap gap-2 border-b-2 border-brand-border pb-1">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
+          <div className="flex gap-2 border-b-2 border-brand-border pb-1 overflow-x-auto whitespace-nowrap">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
@@ -142,7 +142,7 @@ export default function App() {
           </div>
         </div>
 
-        <main className="max-w-6xl mx-auto px-6 py-6 pb-20">
+        <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-20">
           {!hasKey && !showSettings && (
             <div className="bg-brand-warm border-2 border-brand-gold rounded-lg p-4 mb-6 flex items-center gap-3">
               <Settings size={18} className="text-brand-warning shrink-0" />

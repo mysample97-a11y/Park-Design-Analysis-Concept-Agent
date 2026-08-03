@@ -8,7 +8,7 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF, fileToBase64Raw, copyToClipboard } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 
 const REG_DEFAULT = `Governing Standards: Dubai Universal Design Code (max ramp gradient 8%/1:12, min ramp width 1.0m, min crossing width 2.0m, max cross-fall 2%, max ramp run 10m, handrails above 0.5m level change); UAE Federal Law No. 29 of 2006 (Rights of People of Determination); Neighborhood Parks Manual (peak capacity 150-400 visitors/10,000sqm by density band, 15% leasable/commercial area target).
 Compliance method: every path/ramp/crossing checked programmatically against these standards, tagged Pass/Needs Review/Pending.
@@ -120,16 +120,67 @@ export default function CombinedDocumentGenerator() {
     return lines.join("\n");
   }
 
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Section", "Content"], ...SECTIONS.map((s) => [s.label, inputs[s.id] || ""])]), "Sections 1-6");
+  function buildFindings() {
+    const out = [];
+    SECTIONS.forEach((sec) => {
+      if (inputs[sec.id]) out.push({ title: sec.label, text: inputs[sec.id] });
+    });
     if (result) {
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Theme", "Constraint", "Opportunity"], ...(result.matrix || []).map((m) => [m.theme, m.constraint, m.opportunity])]), "Constraints-Opportunities");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Design Implication"], ...(result.design_implications || []).map((d) => [d])]), "Design Implications");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Concept Generator Brief"], [result.concept_brief]]), "Concept Brief");
+      out.push({
+        title: "Consolidated Constraints & Opportunities Matrix",
+        note: "Cross-referenced across every supplied section. Each row traces to a stated finding.",
+        headers: ["Theme", "Constraint", "Opportunity"],
+        rows: (result.matrix || []).map((m) => [m.theme, m.constraint, m.opportunity]),
+      });
+      out.push({
+        title: "Design Implications",
+        items: result.design_implications || [],
+      });
+      out.push({
+        title: "Concept Generator Brief",
+        note: "Formatted for direct paste into the Concept Generator.",
+        text: result.concept_brief || "",
+      });
     }
-    downloadFile(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "site-analysis-consolidated.xlsx", "application/octet-stream");
+    return out;
   }
+
+  // --- Structured 11-section report export ---
+  const [overflowText, setOverflowText] = useState("");
+  const [includeOverflow, setIncludeOverflow] = useState(false);
+  function structuredOpts() {
+    return {
+      toolCode: "CMB",
+      meta,
+      inputRecord: SECTIONS.map((sec) => ({
+        label: sec.label,
+        value: inputs[sec.id] ? `${String(inputs[sec.id]).length} characters supplied` : "(not provided)",
+      })),
+      findings: buildFindings(),
+      chartNote: result ? "Constraints and opportunities matrix is reproduced in the PDF export." : "No synthesis generated yet.",
+      chartsHtml: result
+        ? tableHTML(["Theme", "Constraint", "Opportunity"],
+            (result.matrix || []).map((m) => [m.theme, m.constraint, m.opportunity]), "Constraints and opportunities matrix")
+        : "",
+      interpretation: result
+        ? `The consolidated analysis identifies ${(result.matrix || []).length} cross-cutting themes across the supplied sections. ` +
+          (result.design_implications || []).join(" ")
+        : "",
+      conclusions: result ? (result.design_implications || []) : [],
+      runLimitations: SECTIONS.filter((sec) => !inputs[sec.id]).map((sec) => `Section not supplied: ${sec.label} - its findings are absent from this synthesis.`),
+      extraRefs: [],
+      overflow: overflowText,
+    };
+  }
+  async function withOverflow(run) {
+    if (includeOverflow && !overflowText && apiKey) {
+      const o = await generateOverflow({ provider, apiKey, toolCode: "CMB", reportText: buildFullReportText() });
+      setOverflowText(o);
+      run({ ...structuredOpts(), overflow: o });
+    } else run(structuredOpts());
+  }
+
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
     withOverflow((o) => exportStructuredPDF(o, () => {

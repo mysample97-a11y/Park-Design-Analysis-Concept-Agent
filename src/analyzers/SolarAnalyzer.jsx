@@ -7,7 +7,7 @@ import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -83,10 +83,14 @@ export default function SolarAnalyzer() {
     setSiteLoading(true); setSiteError(""); setSiteInfo(null);
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 500, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 900, useWebSearch: provider === "claude",
         content: `Find the approximate latitude, longitude, and UTC timezone offset (as a number, e.g. 4 for UTC+4) for this location: "${location}". Respond with ONLY valid JSON, no markdown fences: {"lat": 0, "lon": 0, "utc_offset": 0, "resolved_name": "", "source": "how you determined this"}`,
       });
-      setSiteInfo(extractJSON(text));
+      const parsed = extractJSON(text);
+      if (!parsed || typeof parsed.lat !== "number" || typeof parsed.lon !== "number") {
+        throw new Error("The AI did not return usable coordinates for this location. Try a more specific description, e.g. 'Nehru Stadium, Chennai, India'.");
+      }
+      setSiteInfo(parsed);
     } catch (e) { setSiteError(e.message || "Could not resolve this location."); }
     finally { setSiteLoading(false); }
   }
@@ -99,6 +103,39 @@ export default function SolarAnalyzer() {
     const has = z.shaded.includes(dir);
     updateZone(id, { shaded: has ? z.shaded.filter((d) => d !== dir) : [...z.shaded, dir] });
   }
+  function dayparts() {
+    if (!dayData.length) return [];
+    const bands = [
+      ["Early morning", 5, 9], ["Late morning", 9, 12],
+      ["Afternoon", 12, 16], ["Evening", 16, 20],
+    ];
+    return bands.map(([label, from, to]) => {
+      const rows = dayData.filter((r) => {
+        const h = parseInt(r.hourLabel.split(":")[0], 10);
+        return h >= from && h < to;
+      });
+      if (!rows.length) return [label, "sun below horizon", "-", "-"];
+      const peak = rows.reduce((a, b) => (b.elevation > a.elevation ? b : a));
+      const dirs = {};
+      rows.forEach((r) => { dirs[r.compass] = (dirs[r.compass] || 0) + 1; });
+      const dominant = Object.entries(dirs).sort((a, b) => b[1] - a[1])[0][0];
+      return [label, `${rows[0].hourLabel} - ${rows[rows.length - 1].hourLabel}`, `${peak.elevation} deg`, dominant];
+    });
+  }
+
+  function shadeGeometryNote() {
+    if (!dayData.length) return "Resolve a location first.";
+    const peak = dayData.reduce((a, b) => (b.elevation > a.elevation ? b : a));
+    const shadow = (1 / Math.tan((peak.elevation * Math.PI) / 180)).toFixed(2);
+    const vertical = peak.elevation >= 60;
+    return `Peak sun elevation on this reference day is ${peak.elevation} degrees at ${peak.hourLabel}. ` +
+      `A 1 m tall element therefore casts ${shadow} m of shadow at peak. ` +
+      (vertical
+        ? "At this angle the sun is close to overhead, so vertical shading devices - screens, walls, side awnings - contribute almost nothing at midday. Only OVERHEAD cover (tree canopy, pergola, tensile structure) produces usable shade."
+        : "At this angle the sun rakes in laterally, so low sun penetrates beneath overhead canopy. Sun ACCESS may be the amenity rather than the problem, and vertical or angled screening becomes effective where glare control is needed.") +
+      " Thermal comfort commentary here is derived from computed sun geometry only - no UTCI, radiant temperature or CFD simulation has been performed.";
+  }
+
   function exposedHours(zone) { return dayData.filter((row) => row.tier.label !== "Low" && !zone.shaded.includes(row.compass)); }
 
   async function generateInsight() {
@@ -146,7 +183,18 @@ export default function SolarAnalyzer() {
       toolCode: "SOL",
       meta,
       inputRecord: [{label:"Location",value:location||"(not stated)"}],
-      findings: [{ title: "Analysis output", text: buildReportText() }],
+      findings: [
+        { title: "Site and reference day", text: `Site: ${siteInfo?.resolved_name || location}\nCoordinates: ${siteInfo ? `${siteInfo.lat}, ${siteInfo.lon} (UTC${siteInfo.utc_offset >= 0 ? "+" : ""}${siteInfo.utc_offset})` : "not resolved"}\nReference day: ${activePreset.label}` },
+        { title: "Computed sun position", note: "Astronomically computed via the NOAA algorithm - identical on every run.",
+          headers: ["Time", "Elevation deg", "Azimuth deg", "From", "Heat tier"],
+          rows: dayData.map((r) => [r.hourLabel, r.elevation, r.azimuth, r.compass, r.tier.label]) },
+        { title: "Daypart summary", headers: ["Daypart", "Window", "Peak elevation", "Dominant direction"], rows: dayparts() },
+        { title: "Shade coverage requirement", note: "Targets from published park design guidance (Delhi Urban Art Commission).",
+          items: ["Primary walkways (min 1.8 m wide): 80% continuous shade", "Secondary walkways: 60% shade", "Play structures: 100% shade coverage", "Gathering areas: 80% shade", "Informal play and surface parking: 40% shade", "One shaded rest area per 500 m of primary walkway"] },
+        { title: "Shade geometry consequence", text: shadeGeometryNote() },
+        { title: "Zone exposure", headers: ["Zone", "Already shaded from", "Unshaded medium/high exposure"],
+          rows: zones.filter((z) => z.name.trim()).map((z) => [z.name, z.shaded.join(", ") || "none", `${(exposedHours(z).length * 0.5).toFixed(1)} h`]) },
+      ],
       chartNote: dayData.length ? "Sun elevation profile and per-zone exposure chart are reproduced in the PDF export." : "No computed data yet.",
       chartsHtml: dayData.length
         ? barChartSVG(dayData.map((r) => ({ label: `${r.hourLabel}  (${r.compass})`, value: r.elevation, display: r.elevation + " deg" })),
@@ -169,23 +217,7 @@ export default function SolarAnalyzer() {
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Time", "Elevation", "Azimuth", "Direction", "Heat Tier"], ...dayData.map((r) => [r.hourLabel, r.elevation, r.azimuth, r.compass, r.tier.label])]), "Hourly Sun Position");
-    const zoneRows = [["Zone", "Shaded Directions", "Exposure Hours"]];
-    zones.filter((z) => z.name.trim()).forEach((z) => zoneRows.push([z.name, z.shaded.join(", ") || "none", (exposedHours(z).length*0.5)]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(zoneRows), "Zone Summary");
-    if (insight) {
-      const rows = [["Zone", "Recommendation"]];
-      (insight.zone_recommendations || []).forEach((r) => rows.push([r.zone, r.recommendation]));
-      rows.push([]); rows.push(["Conclusion", insight.conclusion]);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "AI Insight");
-    }
-    const blob = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "solar-exposure-analysis.xlsx";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
 
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 

@@ -2,10 +2,11 @@ import React, { useState } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import { friendlyError , fileToBase64Raw } from "../utils/helpers";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG } from "../utils/reportTemplate";
 
 const BTN_DARK = { backgroundColor: "#1C2333", color: "#FFFFFF" };
 const BTN_GOLD = { backgroundColor: "#C9A46A", color: "#1C2333" };
@@ -33,13 +34,7 @@ function fileToBase64(file) {
   });
 }
 
-function friendlyError(rawMessage) {
-  const msg = (rawMessage || "").toLowerCase();
-  if (msg.includes("json") || msg.includes("expected") || msg.includes("unexpected token")) return "The AI's answer got cut off before it finished. Try again - it often succeeds on retry.";
-  if (msg.includes("api returned") || msg.includes("status")) return "The AI service didn't respond successfully - likely a temporary connection hiccup. Wait a few seconds and try again.";
-  if (msg.includes("empty response")) return "The AI didn't send back any content that time. Try again.";
-  return "Something unexpected happened. Try again - if it keeps failing, note the technical detail below and flag it to Jarvis.";
-}
+
 
 function extractJSON(text) {
   const firstBrace = text.indexOf("{");
@@ -48,8 +43,22 @@ function extractJSON(text) {
   return JSON.parse(text.slice(firstBrace, lastBrace + 1));
 }
 
+const SITE_PROMPT =
+  "You are a site analyst preparing a professional site context and accessibility analysis. Use only the location, description and any images supplied. " +
+  "Return ONLY valid JSON, no markdown fences, with these keys: " +
+  "{\"adjacencies\":[{\"direction\":\"N|NE|E|SE|S|SW|W|NW\",\"land_use\":\"\",\"demand_implication\":\"what this generates at that edge\",\"design_response\":\"the specific spatial move it calls for\"}]," +
+  "\"accessibility_standards\":[{\"requirement\":\"\",\"value\":\"\",\"source\":\"the actual code/standard for THIS jurisdiction\"}]," +
+  "\"hazard_screening\":[{\"hazard\":\"flood|seismic|subsidence|contamination|high water table|coastal|storm|other\",\"likelihood\":\"Documented|Possible|Unlikely|Unknown\",\"basis\":\"why - cite what is publicly documented for this region\",\"design_implication\":\"\"}]," +
+  "\"quiet_and_active_zoning\":[{\"edge\":\"\",\"suggested_character\":\"quiet/green buffer OR active/high-throughput\",\"reason\":\"tie to the adjacency - e.g. a school edge needs buffering, a transit edge needs capacity\"}]," +
+  "\"key_findings\":[\"\"],\"constraints\":[\"\"],\"conclusion\":\"2-3 sentences naming the single highest-priority action\"}. " +
+  "For hazard_screening: this is a PRELIMINARY DESK SCREENING prompting professional assessment, not a hazard assessment - only report what is genuinely documented for the region and mark anything else Unknown. " +
+  "For accessibility_standards: cite the standards that actually apply in the country/city given, never a default jurisdiction.";
+
 export default function SiteContextAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
+  const [imageNotes, setImageNotes] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [images, setImages] = useState([]);
   const [location, setLocation] = useState("");
   const [siteDescription, setSiteDescription] = useState("");
   const [siteImage, setSiteImage] = useState(null);
@@ -65,12 +74,26 @@ export default function SiteContextAnalyzer() {
   const [insightError, setInsightError] = useState("");
 
   async function handleImageUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const base64 = await fileToBase64(file);
-    setSiteImage({ base64, mediaType: file.type || "image/png" });
-    setImagePreviewName(file.name);
-    e.target.value = "";
+    const files = Array.from(e.target.files || []).slice(0, 4);
+    if (!files.length) return;
+    setImageLoading(true);
+    setContextError("");
+    try {
+      const blocks = [];
+      for (const f of files) {
+        const b64 = await fileToBase64Raw(f);
+        blocks.push({ type: "image", source: { type: "base64", media_type: f.type || "image/png", data: b64 } });
+      }
+      blocks.push({ type: "text", text: "These are site/GIS/map images for a park design project. Describe what surrounds the site on each edge - adjacent land uses, roads, buildings, transit, open space. Note anything relevant to arrival, access or noise. Write plain factual observations, no speculation." });
+      const text = await callAI({ provider, apiKey, maxTokens: 2500, content: blocks });
+      if (!text) throw new Error("The AI returned no description for these images.");
+      setImageNotes((prev) => (prev ? prev + "\n\n" : "") + text);
+    } catch (err) {
+      setContextError(err.message || "Could not read these images.");
+    } finally {
+      setImageLoading(false);
+      e.target.value = "";
+    }
   }
 
   async function analyzeSiteContext() {
@@ -203,7 +226,31 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
       meta,
       inputRecord: [{label:"Location",value:location||"(not stated)"},{label:"Description",value:(siteDescription||"(none)").slice(0,400)}],
       findings: [{ title: "Analysis output", text: buildReportText() }],
-      chartNote: "Charts generated by this tool are included in the PDF export.",
+      chartNote: (zones.filter((z) => z.name.trim()).length || (insight?.adjacencies || []).length)
+        ? "Adjacency map, zone capacity chart and accessibility check table are reproduced in the PDF export."
+        : "No charts - add zones or run the analysis first.",
+      chartsHtml:
+        ((insight?.adjacencies || []).length
+          ? tableHTML(["Direction", "Adjacent land use", "Demand implication", "Design response"],
+              insight.adjacencies.map((a) => [a.direction, a.land_use, a.demand_implication, a.design_response]),
+              "Adjacent land use by edge")
+          : "") +
+        ((insight?.hazard_screening || []).length
+          ? tableHTML(["Hazard", "Likelihood", "Basis", "Design implication"],
+              insight.hazard_screening.map((hz) => [hz.hazard, hz.likelihood, hz.basis, hz.design_implication]),
+              "Preliminary hazard screening (desk study - prompts professional assessment)")
+          : "") +
+        ((insight?.quiet_and_active_zoning || []).length
+          ? tableHTML(["Edge", "Suggested character", "Reason"],
+              insight.quiet_and_active_zoning.map((q) => [q.edge, q.suggested_character, q.reason]),
+              "Suggested edge character")
+          : "") +
+        (zones.filter((z) => z.name.trim()).length
+          ? barChartSVG(zones.filter((z) => z.name.trim()).map((z) => {
+              const c = capacityRange(z.area);
+              return { label: z.name, value: c.high, display: `${c.low}-${c.high} people` };
+            }), { title: "Indicative peak capacity by zone" })
+          : ""),
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.recommendations || []).map((r)=>typeof r==="string"?r:(r.recommendation||"")),
       runLimitations: [],
@@ -219,24 +266,7 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
-    if (context) {
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Direction", "Adjacent Use", "Implication"], ...(context.adjacencies || []).map((a) => [a.direction, a.use, a.implication])]), "Adjacency");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Standard", "Value", "Source"], ...(context.accessibility_standards || []).map((s) => [s.label, s.value, s.source])]), "Access Standards");
-    }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Zone", "Area m2", "Low Capacity", "High Capacity"], ...zones.filter((z) => z.name.trim()).map((z) => { const c = capacityRange(z.area); return [z.name, z.area, c.low, c.high]; })]), "Zone Capacity");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Path", "Type", "Width m", "Level Change m", "Check"], ...paths.filter((p) => p.name.trim()).map((p) => [p.name, p.type, p.width, p.levelChange, checkPath(p).label])]), "Path Accessibility");
-    if (insight) {
-      const rows = [["Findings"]];
-      (insight.findings || []).forEach((f) => rows.push([f]));
-      rows.push([]); rows.push(["Forward Constraints"]);
-      (insight.forward_constraints || []).forEach((f) => rows.push([f]));
-      rows.push([]); rows.push(["Conclusion", insight.conclusion]);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "AI Insight");
-    }
-    downloadBlob(XLSX.write(wb, { bookType: "xlsx", type: "array" }), "site-context-analysis.xlsx", "application/octet-stream");
-  }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
 
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
@@ -266,9 +296,18 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
             <textarea value={siteDescription} onChange={(e) => setSiteDescription(e.target.value)} placeholder="Describe what's around the site (adjacent buildings, roads, land uses) - or upload a GIS/map image below instead" rows={4} className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-3 focus:border-[#C9A46A] outline-none resize-y" />
             <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
               <ImageIcon size={15} /> {imagePreviewName || "Upload Site/GIS Map Image (optional)"}
-              <input type="file" accept="image/*" onChange={handleImageUpload} className="sr-only" />
+              <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="sr-only" />
             </label>
-            <p className="text-[10px] text-[#8A8474]">Image upload may not work inside the Claude mobile app (platform restriction) - try your phone's regular browser, or use the text fields above.</p>
+            {imageNotes && (
+              <div className="mt-2 border border-brand-border rounded p-2.5 bg-[#F7F5F1]">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Map / photo interpretation (AI-generated)</p>
+                  <button onClick={() => setImageNotes("")} className="text-[10px] text-brand-danger hover:underline">Clear</button>
+                </div>
+                <p className="text-[10px] text-brand-text whitespace-pre-wrap max-h-32 overflow-y-auto">{imageNotes}</p>
+              </div>
+            )}
+            <p className="text-[10px] text-[#8A8474]">Up to 4 images. Image upload may not work inside the Claude mobile app (platform restriction) - try your phone's regular browser, or use the text fields above.</p>
             <button onClick={analyzeSiteContext} disabled={contextLoading} style={BTN_GOLD} className="w-full text-base font-bold px-4 py-3 rounded-md flex items-center justify-center gap-2 disabled:opacity-40 shadow-md">
               <Search size={18} /> {contextLoading ? "Researching site context..." : "Analyze Site Context"}
             </button>

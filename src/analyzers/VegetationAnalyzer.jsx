@@ -4,9 +4,9 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
-import { friendlyError, extractJSON, fileToBase64 } from "../utils/helpers";
+import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const MAX_IMAGES = 5;
@@ -97,7 +97,7 @@ export default function VegetationAnalyzer() {
     try {
       const contentBlocks = [];
       for (const file of files) {
-        const base64 = await fileToBase64(file);
+        const base64 = await fileToBase64Raw(file);
         contentBlocks.push({ type: "image", source: { type: "base64", media_type: file.type || "image/png", data: base64 } });
       }
       contentBlocks.push({ type: "text", text: "These are site-visit photos from a park redesign project. Describe what vegetation/trees/plants are visible across all photos - species if identifiable, apparent condition, approximate count per photo. Write this as plain field notes (a few sentences per photo), the way a landscape architect would jot down observations. Do not describe anything other than vegetation." });
@@ -185,22 +185,7 @@ export default function VegetationAnalyzer() {
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Species", "Type", "Water", "Shade", "Origin"], ...PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin])]), "Reference Palette");
-    if (inventory && inventory.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Species", "Count", "Condition", "Recommendation", "Notes"], ...inventory.map((v) => [v.name, v.estimated_count, v.condition, v.recommendation, v.notes])]), "Existing Inventory");
-    if (insight) {
-      const rows = [["Terrain/Soil Note", insight.terrain_soil_note], ["Inventory Guidance", insight.inventory_guidance], []];
-      rows.push(["Suggested Species", "Reason"]);
-      (insight.suggested_species || []).forEach((s) => rows.push([s.name, s.reason]));
-      rows.push([]); rows.push(["Conclusion", insight.conclusion]);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "AI Insight");
-    }
-    const blob = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "al-safa-2-vegetation-terrain-soil.xlsx";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
 
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
@@ -273,7 +258,7 @@ export default function VegetationAnalyzer() {
       <div className="bg-white rounded-lg border border-brand-border p-4 flex gap-3">
         <Mountain size={18} className="text-[#8A6A3A] shrink-0 mt-0.5" />
         <div className="text-sm text-brand-text">
-          <p><span className="font-semibold">Terrain:</span> ~2m above sea level. Dubai coastal terrain is flat (0-10m citywide) - significant natural slope unlikely, pending real DWG confirmation.</p>
+          <p><span className="font-semibold">Terrain:</span> {terrainNote || "No survey data supplied - terrain characteristics must be confirmed against a site survey before reliance."}</p>
           <p className="mt-1"><span className="font-semibold">Soil:</span> No public dataset found - unverified assumption until geotechnical data is sourced.</p>
         </div>
       </div>
@@ -282,7 +267,7 @@ export default function VegetationAnalyzer() {
         <div className="px-4 py-3 border-b border-brand-border flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">General Reference Palette</h2>
-            <p className="text-[10px] text-brand-text/60 mt-0.5">A pre-compiled Dubai-appropriate species list, NOT yet matched to this specific site - that matching happens in the AI Insight below.</p>
+            <p className="text-[10px] text-brand-text/60 mt-0.5">A regional reference list, NOT yet matched to this specific site - that matching happens in the AI Insight below. Research the location above to replace it with a palette for your region.</p>
           </div>
           <select value={waterFilter} onChange={(e) => setWaterFilter(e.target.value)} className="text-xs bg-[#F7F5F1] border border-brand-border rounded px-2 py-1"><option value="all">All water needs</option><option value="Low">Low water only</option><option value="Medium">Medium water</option><option value="High">High water (flagged)</option></select>
         </div>

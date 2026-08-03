@@ -31,3 +31,21 @@
     @apply w-full text-sm bg-[#F7F5F1] border-2 border-brand-border rounded-md p-3 focus:border-brand-gold outline-none resize-y transition-colors;
   }
 }
+
+
+/* ---- Mobile: prevent horizontal overflow and allow tables to scroll ---- */
+html, body { max-width: 100%; overflow-x: hidden; }
+#root { max-width: 100%; }
+
+@media (max-width: 640px) {
+  .card { border-radius: 8px; }
+  .card-header { font-size: 12px; padding: 10px 12px; }
+  .input, .textarea { font-size: 16px; } /* 16px prevents iOS zoom-on-focus */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+  pre { font-size: 10px; }
+  .btn-gold, .btn-dark, .btn-outline { width: 100%; justify-content: center; }
+}
+
+/* any wide element inside a card scrolls rather than pushing the page wide */
+.card .overflow-x-auto { max-width: 100%; }
+svg { max-width: 100%; height: auto; }

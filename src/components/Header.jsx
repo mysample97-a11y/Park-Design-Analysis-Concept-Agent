@@ -6,7 +6,7 @@ export default function Header({ onToggleSettings, settingsOpen }) {
       <div className="max-w-6xl mx-auto flex items-start justify-between gap-4">
         <div>
           <p className="text-xs tracking-[0.2em] uppercase text-brand-gold">
-            Al Safa 2 — AI Park Competition
+            Site Analysis Suite
           </p>
           <h1 className="text-2xl font-semibold tracking-tight text-white">
             Site Analysis Suite
