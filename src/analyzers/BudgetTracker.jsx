@@ -11,7 +11,8 @@ import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, gener
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
-// Cascading wrapper rates with confidence bands (Turner & Townsend UAEMI-style defaults, editable)
+// Cascading wrapper percentages. These are typical industry ranges and MUST be checked
+// against a published cost index for the project market - they are editable for that reason.
 const DEFAULT_RATES = {
   preliminaries: { pct: 13, base: "Construction Subtotal", confidence: "Verified-Macro" },
   ohp: { pct: 11, base: "Subtotal + Preliminaries", confidence: "Verified-Macro" },
@@ -34,7 +35,7 @@ export default function BudgetTracker() {
   const [rates, setRates] = useState(DEFAULT_RATES);
   const [pasteText, setPasteText] = useState("");
   const [location, setLocation] = useState("");
-  const [currency, setCurrency] = useState("AED");
+  const [currency, setCurrency] = useState("");
   const [researching, setResearching] = useState(false);
   const [researchNote, setResearchNote] = useState("");
   const [researchError, setResearchError] = useState("");
@@ -199,7 +200,7 @@ export default function BudgetTracker() {
     let lines = ["BUDGET TRACKER - COST ESTIMATE (MVP/PROTOTYPE)", "Method: cascading wrapper (RICS NRM1 style). Rates carry confidence bands - verify Assumption-Flagged items.", "", "FACILITIES"];
     facilities.filter((f) => f.name.trim()).forEach((f) => lines.push(`  ${f.name}: ${f.area} m2 x ${f.rate} = ${formatNumber((Number(f.area) || 0) * (Number(f.rate) || 0))} ${currency}`));
     lines.push("", "COST BUILD-UP");
-    wrapperRows.forEach((r) => lines.push(`  ${r.label}: ${formatNumber(r.amount)} AED${r.confidence ? ` [${r.confidence}]` : ""}`));
+    wrapperRows.forEach((r) => lines.push(`  ${r.label}: ${formatNumber(r.amount)} ${currency}${r.confidence ? ` [${r.confidence}]` : ""}`));
     if (insight) {
       lines.push("", "AI OBSERVATIONS");
       (insight.observations || []).forEach((o) => lines.push(`  - ${o}`));
@@ -280,7 +281,7 @@ export default function BudgetTracker() {
             </div>
             <div>
               <label className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Currency</label>
-              <input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="AED" className="input text-xs mt-0.5 font-mono" />
+              <input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="e.g. AED, USD, EUR, INR" className="input text-xs mt-0.5 font-mono" />
             </div>
             <div>
               <label className="text-[10px] font-semibold text-brand-text uppercase tracking-wide">Budget cap (optional)</label>

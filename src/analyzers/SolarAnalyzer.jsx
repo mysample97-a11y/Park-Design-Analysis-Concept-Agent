@@ -7,7 +7,7 @@ import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML, sunPathCompassSVG } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -42,6 +42,26 @@ function solarPosition(dateObj, hourDecimal, lat, lon, utcOffset) {
   return { elevation, azimuth };
 }
 
+/**
+ * ASHRAE clear-sky irradiance model.
+ * DNI = A * exp(-B / sin(elevation)), diffuse = C * DNI, GHI = DNI*sin(elev) + diffuse.
+ * A, B, C are the published ASHRAE monthly clear-sky coefficients, interpolated by day of year.
+ * This yields solar INSOLATION in W/m2 - the metric professional solar analysis reports
+ * (Autodesk Insight and equivalent tools report cumulative kWh/m2 on this basis).
+ * CLEAR-SKY ONLY: no cloud cover, aerosol or humidity attenuation. Treat as an upper bound.
+ */
+function clearSkyIrradiance(dayOfYear, elevationDeg) {
+  if (elevationDeg <= 0) return { dni: 0, diffuse: 0, ghi: 0 };
+  const A = 1160 + 75 * Math.sin((2 * Math.PI * (dayOfYear - 275)) / 365);
+  const B = 0.174 + 0.035 * Math.sin((2 * Math.PI * (dayOfYear - 100)) / 365);
+  const C = 0.095 + 0.04 * Math.sin((2 * Math.PI * (dayOfYear - 100)) / 365);
+  const beta = (elevationDeg * Math.PI) / 180;
+  const dni = A * Math.exp(-B / Math.sin(beta));
+  const diffuse = C * dni;
+  const ghi = dni * Math.sin(beta) + diffuse;
+  return { dni: Math.round(dni), diffuse: Math.round(diffuse), ghi: Math.round(ghi) };
+}
+
 function azimuthToCompass(az) { return DIRECTIONS[Math.round(az / 45) % 8]; }
 function heatTier(elevation) {
   if (elevation >= 55) return { label: "High", color: "#B84C3D" };
@@ -50,14 +70,17 @@ function heatTier(elevation) {
 }
 
 function buildDayData(month, day, lat, lon, utcOffset) {
+  const doyStart = new Date(new Date().getFullYear(), 0, 0);
   const year = new Date().getFullYear();
   const date = new Date(year, month, day);
+  const dayOfYear = Math.floor((date - doyStart) / 86400000);
   const rows = [];
   for (let h = 5; h <= 19.5; h += 0.5) {
     const { elevation, azimuth } = solarPosition(date, h, lat, lon, utcOffset);
     if (elevation > 0) {
       const hh = Math.floor(h); const mm = h % 1 === 0 ? "00" : "30";
-      rows.push({ hourLabel: `${String(hh).padStart(2, "0")}:${mm}`, elevation: Math.round(elevation * 10) / 10, azimuth: Math.round(azimuth * 10) / 10, compass: azimuthToCompass(azimuth), tier: heatTier(elevation) });
+      const irr = clearSkyIrradiance(dayOfYear, elevation);
+      rows.push({ ghi: irr.ghi, dni: irr.dni, hourLabel: `${String(hh).padStart(2, "0")}:${mm}`, elevation: Math.round(elevation * 10) / 10, azimuth: Math.round(azimuth * 10) / 10, compass: azimuthToCompass(azimuth), tier: heatTier(elevation) });
     }
   }
   return rows;
@@ -91,6 +114,7 @@ export default function SolarAnalyzer() {
         throw new Error("The AI did not return usable coordinates for this location. Try a more specific description, e.g. 'Nehru Stadium, Chennai, India'.");
       }
       setSiteInfo(parsed);
+      autoSuggestZones(parsed);
     } catch (e) { setSiteError(e.message || "Could not resolve this location."); }
     finally { setSiteLoading(false); }
   }
@@ -103,6 +127,50 @@ export default function SolarAnalyzer() {
     const has = z.shaded.includes(dir);
     updateZone(id, { shaded: has ? z.shaded.filter((d) => d !== dir) : [...z.shaded, dir] });
   }
+  const [autoNote, setAutoNote] = useState("");
+  const [autoLoading, setAutoLoading] = useState(false);
+
+  // ARCH: the tool proposes its own zones and likely obstructions from the location,
+  // so the user is not asked to invent zones at analysis stage.
+  async function autoSuggestZones(site) {
+    setAutoLoading(true);
+    try {
+      const text = await callAI({
+        provider, apiKey, maxTokens: 1600, useWebSearch: provider === "claude",
+        content:
+          `For a public park / open space at "${site?.resolved_name || location}" (lat ${site?.lat}, lon ${site?.lon}), propose the typical functional zones such a space would contain, and for each, which compass directions are LIKELY already shaded by surrounding built form, existing tree canopy or topography. ` +
+          "Base the shading on what is actually around that location - adjacent buildings, streets, mature planting - not on assumption. If you cannot tell, return an empty shaded array for that zone rather than guessing. " +
+          "Respond with ONLY a JSON array, no markdown fences: " +
+          '[{"name":"zone name","purpose":"what it is for","shaded":["N","NE"],"shading_basis":"what causes that shade, or \'unknown\'"}]. ' +
+          "Give 5 to 7 zones covering the usual range: arrival, active recreation, children's play, passive/quiet, gathering/event, planting/biodiversity, service.",
+      });
+      const parsed = extractJSON(text);
+      if (Array.isArray(parsed) && parsed.length) {
+        setZones(parsed.map((z) => ({
+          id: uid(),
+          name: z.name || "",
+          shaded: Array.isArray(z.shaded) ? z.shaded.filter((d) => DIRECTIONS.includes(d)) : [],
+          purpose: z.purpose || "",
+          shadingBasis: z.shading_basis || "unknown",
+          autoSuggested: true,
+        })));
+        setAutoNote("Zones and likely existing shade were proposed by the tool from the location. Review and edit them - they are a starting point, not a survey.");
+      }
+    } catch (e) {
+      setAutoNote("Could not auto-propose zones for this location. You can add them manually below, or run the analysis without zones for a site-wide result.");
+    } finally { setAutoLoading(false); }
+  }
+
+  // Daily clear-sky insolation, integrated from the half-hourly GHI values.
+  function dailyInsolation() {
+    if (!dayData.length) return 0;
+    return dayData.reduce((sum, r) => sum + (r.ghi || 0) * 0.5, 0) / 1000; // kWh/m2/day
+  }
+  function peakIrradiance() {
+    if (!dayData.length) return 0;
+    return Math.max(...dayData.map((r) => r.ghi || 0));
+  }
+
   function dayparts() {
     if (!dayData.length) return [];
     const bands = [
@@ -139,20 +207,55 @@ export default function SolarAnalyzer() {
   function exposedHours(zone) { return dayData.filter((row) => row.tier.label !== "Low" && !zone.shaded.includes(row.compass)); }
 
   async function generateInsight() {
-    if (!siteInfo) { setInsightError("Resolve a project location above first."); return; }
+    if (!siteInfo) { setInsightError("Set a project location above first."); return; }
     setInsightLoading(true); setInsight(null); setInsightError("");
+    const named = zones.filter((z) => z.name.trim());
     const summary = {
       date_analyzed: activePreset.label,
       site: siteInfo.resolved_name || location,
-      zones: zones.filter((z) => z.name.trim()).map((z) => {
+      latitude: siteInfo.lat,
+      peak_sun_elevation_deg: dayData.length ? Math.max(...dayData.map((r) => r.elevation)) : null,
+      shadow_per_metre_at_peak: dayData.length ? (1 / Math.tan((Math.max(...dayData.map((r) => r.elevation)) * Math.PI) / 180)).toFixed(2) : null,
+      daylight_hours: dayData.length * 0.5,
+      hours_above_high_tier: dayData.filter((r) => r.tier.label === "High").length * 0.5,
+      clear_sky_insolation_kwh_m2_day: Number(dailyInsolation().toFixed(2)),
+      peak_irradiance_w_m2: peakIrradiance(),
+      hours_medium_tier: dayData.filter((r) => r.tier.label === "Medium").length * 0.5,
+      dayparts: dayparts(),
+      published_shade_targets: {
+        primary_walkways_min_1_8m_wide: "80% continuous shade",
+        secondary_walkways: "60% shade",
+        play_structures: "100% shade coverage",
+        gathering_areas: "80% shade",
+        informal_play_and_parking: "40% shade",
+        rest_areas: "one shaded rest area per 500 m of primary walkway",
+        source: "Delhi Urban Art Commission, Park Design Guidelines",
+      },
+      zones: named.map((z) => {
         const exposed = exposedHours(z);
-        return { zone: z.name, currently_shaded_directions: z.shaded, high_medium_exposure_hours: Number((exposed.length*0.5).toFixed(1)), exposure_hour_list: exposed.map((r) => `${r.hourLabel} (${r.tier.label}, sun from ${r.compass})`) };
+        return {
+          zone: z.name,
+          purpose: z.purpose || "",
+          currently_shaded_directions: z.shaded,
+          shading_basis: z.shadingBasis || "user-declared",
+          unshaded_medium_high_hours: Number((exposed.length * 0.5).toFixed(1)),
+          exposure_detail: exposed.map((r) => `${r.hourLabel} (${r.tier.label}, sun from ${r.compass})`),
+        };
       }),
     };
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 2500, useWebSearch: false,
-        content: "You are a landscape architecture assistant analyzing real computed solar-exposure data for zones in a park redesign project. For each zone, give a one-line shade-strategy recommendation citing the actual exposure hour count and which compass direction(s) most need shade coverage, based only on the data given. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone for shade intervention and why. Do not invent temperature or UV figures not present in the data. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        content: "You are a landscape architect interpreting computed solar geometry for a site. Use ONLY the computed data supplied - never invent temperature, UV or radiation figures. " +
+          "Assess the site against the published shade coverage targets provided, and state where the site will fail them. " +
+          "Comment on thermal comfort qualitatively, derived from sun angle and exposure duration only - explicitly note that no UTCI or radiant simulation was performed. " +
+          "Respond with ONLY valid JSON, no markdown fences: {" +
+          "\"site_wide_finding\":\"2-3 sentences on the solar regime and what it demands of the design\"," +
+          "\"shade_strategy\":[{\"element\":\"e.g. primary walkway, play area, gathering space\",\"target\":\"the published coverage target\",\"implication\":\"what must be provided here given the computed sun angle\"}]," +
+          "\"thermal_comfort_note\":\"derived commentary - which hours are usable, which are not, and why\"," +
+          "\"zone_recommendations\":[{\"zone\":\"\",\"recommendation\":\"cite the actual exposure hours and the directions needing cover\"}]," +
+          "\"conclusion\":\"2-3 sentences naming the single highest-priority shade intervention\"}" +
+          "\n\nCOMPUTED DATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
@@ -186,8 +289,15 @@ export default function SolarAnalyzer() {
       findings: [
         { title: "Site and reference day", text: `Site: ${siteInfo?.resolved_name || location}\nCoordinates: ${siteInfo ? `${siteInfo.lat}, ${siteInfo.lon} (UTC${siteInfo.utc_offset >= 0 ? "+" : ""}${siteInfo.utc_offset})` : "not resolved"}\nReference day: ${activePreset.label}` },
         { title: "Computed sun position", note: "Astronomically computed via the NOAA algorithm - identical on every run.",
-          headers: ["Time", "Elevation deg", "Azimuth deg", "From", "Heat tier"],
-          rows: dayData.map((r) => [r.hourLabel, r.elevation, r.azimuth, r.compass, r.tier.label]) },
+          headers: ["Time", "Elevation deg", "Azimuth deg", "From", "Clear-sky GHI W/m2", "Heat tier"],
+          rows: dayData.map((r) => [r.hourLabel, r.elevation, r.azimuth, r.compass, r.ghi, r.tier.label]) },
+        { title: "Solar insolation", note: "The metric professional solar analysis reports. Computed with the ASHRAE clear-sky model from the NOAA sun position - CLEAR-SKY ONLY, so treat as an upper bound with no cloud, aerosol or humidity attenuation.",
+          headers: ["Measure", "Value", "Basis"],
+          rows: [
+            ["Daily clear-sky insolation", `${dailyInsolation().toFixed(2)} kWh/m2/day`, "Integrated global horizontal irradiance across daylight hours"],
+            ["Peak irradiance", `${peakIrradiance()} W/m2`, "Global horizontal at solar noon"],
+            ["Daylight duration", `${(dayData.length * 0.5).toFixed(1)} h`, "Sun above horizon"],
+          ] },
         { title: "Daypart summary", headers: ["Daypart", "Window", "Peak elevation", "Dominant direction"], rows: dayparts() },
         { title: "Shade coverage requirement", note: "Targets from published park design guidance (Delhi Urban Art Commission).",
           items: ["Primary walkways (min 1.8 m wide): 80% continuous shade", "Secondary walkways: 60% shade", "Play structures: 100% shade coverage", "Gathering areas: 80% shade", "Informal play and surface parking: 40% shade", "One shaded rest area per 500 m of primary walkway"] },
@@ -196,12 +306,18 @@ export default function SolarAnalyzer() {
           rows: zones.filter((z) => z.name.trim()).map((z) => [z.name, z.shaded.join(", ") || "none", `${(exposedHours(z).length * 0.5).toFixed(1)} h`]) },
       ],
       chartNote: dayData.length ? "Sun elevation profile and per-zone exposure chart are reproduced in the PDF export." : "No computed data yet.",
-      chartsHtml: dayData.length
+      chartsHtml: (dayData.length
+        ? `<div style="margin:12px 0;">${sunPathCompassSVG(
+            dayData.map((r) => ({ az: r.azimuth, elev: r.elevation, tier: r.tier.label, hourLabel: r.hourLabel })),
+            [...new Set(zones.flatMap((z) => z.shaded || []))],
+            `Sun path and existing shade - ${activePreset.label}`
+          )}</div>`
+        : "") + (dayData.length
         ? barChartSVG(dayData.map((r) => ({ label: `${r.hourLabel}  (${r.compass})`, value: r.elevation, display: r.elevation + " deg" })),
             { title: `Sun elevation - ${activePreset.label}` })
           + barChartSVG(zones.filter((z) => z.name.trim()).map((z) => ({ label: z.name, value: exposedHours(z).length*0.5, display: (exposedHours(z).length*0.5).toFixed(1) + " h" })),
             { title: "Unshaded medium/high exposure by zone", color: "#B84C3D" })
-        : "",
+        : ""),
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
       runLimitations: [],
@@ -284,7 +400,10 @@ export default function SolarAnalyzer() {
                       <button onClick={() => removeZone(z.id)} className="text-[#B8A98F] hover:text-brand-danger"><Trash2 size={14} /></button>
                     </div>
                     <div>
-                      <p className="text-[10px] text-brand-text/60 mb-1 uppercase tracking-wide">Directions already shaded</p>
+                      {z.purpose && <p className="text-[10px] text-brand-text/70 mb-1">{z.purpose}</p>}
+                        <p className="text-[10px] text-brand-text/60 mb-1 uppercase tracking-wide">
+                          Directions already shaded {z.shadingBasis && z.shadingBasis !== "unknown" ? `- ${z.shadingBasis}` : ""}
+                        </p>
                       <div className="flex flex-wrap gap-1.5">{DIRECTIONS.map((d) => (<button key={d} onClick={() => toggleShaded(z.id, d)} className={`w-9 h-8 rounded text-xs font-medium border transition ${z.shaded.includes(d) ? "bg-brand-success text-white border-brand-success" : "bg-white text-brand-dark border-[#DDD6C9]"}`}>{d}</button>))}</div>
                     </div>
                     <p className="text-xs"><span className="font-semibold" style={{ color: exposed.length > 6 ? "#B84C3D" : exposed.length > 2 ? "#B8863B" : "#3D7A5C" }}>{(exposed.length*0.5).toFixed(1)} hours</span> of Medium/High sun exposure, unshaded.</p>

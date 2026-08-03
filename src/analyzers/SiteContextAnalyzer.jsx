@@ -58,11 +58,8 @@ export default function SiteContextAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [imageNotes, setImageNotes] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
-  const [images, setImages] = useState([]);
   const [location, setLocation] = useState("");
   const [siteDescription, setSiteDescription] = useState("");
-  const [siteImage, setSiteImage] = useState(null);
-  const [imagePreviewName, setImagePreviewName] = useState("");
   const [context, setContext] = useState(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState("");
@@ -85,41 +82,7 @@ export default function SiteContextAnalyzer() {
         blocks.push({ type: "image", source: { type: "base64", media_type: f.type || "image/png", data: b64 } });
       }
       blocks.push({ type: "text", text: "These are site/GIS/map images for a park design project. Describe what surrounds the site on each edge - adjacent land uses, roads, buildings, transit, open space. Note anything relevant to arrival, access or noise. Write plain factual observations, no speculation." });
-      const text = await callAI({ provider, apiKey, maxTokens: 2500, content: blocks });
-      if (!text) throw new Error("The AI returned no description for these images.");
-      setImageNotes((prev) => (prev ? prev + "\n\n" : "") + text);
-    } catch (err) {
-      setContextError(err.message || "Could not read these images.");
-    } finally {
-      setImageLoading(false);
-      e.target.value = "";
-    }
-  }
-
-  async function analyzeSiteContext() {
-    if (!location.trim() && !siteDescription.trim() && !siteImage) {
-      setContextError("Give this tool at least a location, a description, or a site image to analyze.");
-      return;
-    }
-    setContextLoading(true); setContextError(""); setContext(null);
-
-    const systemPrompt = `You are a landscape architecture site-analysis assistant. Given the information about a park/public-space project site, produce:
-(1) 'adjacencies': an array of {direction, use, implication} objects describing what's around the site and the design implication of each,
-(2) 'accessibility_standards': an array of {label, value, min_width_m (number), source} objects giving the real, current accessibility standards that apply in this project's jurisdiction.
-Only use information given or verifiable context. If jurisdiction is unclear, state it in a 'note' field and use widely-recognized international guidance as fallback.
-Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":"","use":"","implication":""}], "accessibility_standards": [{"label":"","value":"","min_width_m":0,"source":""}], "note": ""}`;
-
-    const userPrompt = `LOCATION: ${location || "Not specified"}\nSITE DESCRIPTION: ${siteDescription || "Not specified"}`;
-
-    try {
-      
-      const resText = await callAI({
-        provider,
-        apiKey: apiKey,
-        maxTokens: 4000,
-        prompt: userPrompt,
-        systemInstruction: systemPrompt,
-        imageData: siteImage?.base64 ? `data:${siteImage.mediaType};base64,${siteImage.base64}` : null
+      const text = await callAI({ provider, apiKey, maxTokens: 2500, content: SITE_PROMPT + "\n\nLOCATION: " + location + "\nDESCRIPTION: " + (siteDescription || "(none)") + (imageNotes ? "\n\nIMAGE INTERPRETATION:\n" + imageNotes : "") + "\n\nZONES: " + JSON.stringify(zones.filter((z) => z.name.trim())) + "\nPATHS: " + JSON.stringify(paths.filter((pa) => pa.name.trim())),
       });
 
       if (!resText) throw new Error("The AI returned an empty response.");
@@ -207,10 +170,10 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
     lines.push("", "PATH & RAMP ACCESSIBILITY CHECK");
     paths.filter((p) => p.name.trim()).forEach((p) => lines.push(`  ${p.name} (${p.type}, ${p.width}m): ${checkPath(p).label}`));
     if (insight) {
-      lines.push("", "AI FINDINGS");
-      (insight.findings || []).forEach((f) => lines.push(`  - ${f}`));
+      lines.push("", "KEY FINDINGS");
+      (insight.key_findings || []).forEach((f) => lines.push(`  - ${f}`));
       lines.push("", "CONSTRAINTS FOR CONCEPT GENERATOR");
-      (insight.forward_constraints || []).forEach((f) => lines.push(`  - ${f}`));
+      (insight.constraints || []).forEach((f) => lines.push(`  - ${f}`));
       lines.push("", "CONCLUSION", insight.conclusion || "");
     }
     return lines.join("\n");
@@ -252,7 +215,7 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
             }), { title: "Indicative peak capacity by zone" })
           : ""),
       interpretation: insight?.conclusion || "",
-      conclusions: (insight?.recommendations || []).map((r)=>typeof r==="string"?r:(r.recommendation||"")),
+      conclusions: [...(insight?.key_findings || []), ...(insight?.constraints || [])].filter(Boolean),
       runLimitations: [],
       extraRefs: [],
       overflow: overflowText,
@@ -390,8 +353,50 @@ Respond with ONLY valid JSON, no markdown fences: {"adjacencies": [{"direction":
           {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(insightError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-5">Technical: {insightError}</p></div>)}
           {insight && (
             <div className="space-y-3">
-              <div className="space-y-1">{(insight.findings || []).map((f, i) => (<p key={i} className="text-sm text-[#3A362C]">- {f}</p>))}</div>
-              {insight.forward_constraints?.length > 0 && (<div className="border-t border-[#F0EBDF] pt-2"><p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Constraints to carry into Concept Generator</p>{insight.forward_constraints.map((f, i) => (<p key={i} className="text-xs text-[#5A5445]">- {f}</p>))}</div>)}
+              <div className="space-y-1">{(insight.key_findings || []).map((f, i) => (<p key={i} className="text-sm text-[#3A362C]">- {f}</p>))}</div>
+
+              {insight.adjacencies?.length > 0 && (
+                <div className="border-t border-[#F0EBDF] pt-2">
+                  <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Adjacent land use by edge</p>
+                  {insight.adjacencies.map((a, i) => (
+                    <p key={i} className="text-xs text-[#5A5445] mb-1">
+                      <span className="font-semibold">{a.direction}:</span> {a.land_use} - {a.demand_implication} <span className="text-brand-success">{a.design_response}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {insight.quiet_and_active_zoning?.length > 0 && (
+                <div className="border-t border-[#F0EBDF] pt-2">
+                  <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Suggested edge character</p>
+                  {insight.quiet_and_active_zoning.map((q, i) => (
+                    <p key={i} className="text-xs text-[#5A5445]"><span className="font-semibold">{q.edge}:</span> {q.suggested_character} - {q.reason}</p>
+                  ))}
+                </div>
+              )}
+
+              {insight.hazard_screening?.length > 0 && (
+                <div className="border-t border-[#F0EBDF] pt-2">
+                  <p className="text-xs font-semibold text-[#B84C3D] uppercase tracking-wide mb-1">Preliminary hazard screening</p>
+                  <p className="text-[10px] text-[#8A8474] mb-1">Desk screening only - prompts professional assessment, it is not a hazard assessment.</p>
+                  {insight.hazard_screening.map((hz, i) => (
+                    <p key={i} className="text-xs text-[#5A5445]">
+                      <span className="font-semibold">{hz.hazard}</span> ({hz.likelihood}): {hz.basis} - {hz.design_implication}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {insight.accessibility_standards?.length > 0 && (
+                <div className="border-t border-[#F0EBDF] pt-2">
+                  <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Accessibility standards applied</p>
+                  {insight.accessibility_standards.map((a, i) => (
+                    <p key={i} className="text-xs text-[#5A5445]"><span className="font-semibold">{a.requirement}:</span> {a.value} <span className="text-[10px]">({a.source})</span></p>
+                  ))}
+                </div>
+              )}
+
+              {insight.constraints?.length > 0 && (<div className="border-t border-[#F0EBDF] pt-2"><p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Constraints to carry into Concept Generator</p>{insight.constraints.map((f, i) => (<p key={i} className="text-xs text-[#5A5445]">- {f}</p>))}</div>)}
             </div>
           )}
           {!insight && !insightLoading && !insightError && <p className="text-sm text-[#8A8474]">Analyze site context above (Step 1), fill in zones/paths, then generate a synthesis.</p>}

@@ -29,7 +29,7 @@ const DEFAULT_PALETTE = [
 export default function VegetationAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
-  const [PLANT_PALETTE, setPalette] = useState(DEFAULT_PALETTE);
+  const [PLANT_PALETTE, setPalette] = useState([]);
   const [researching, setResearching] = useState(false);
   const [researchNote, setResearchNote] = useState("");
   const [researchError, setResearchError] = useState("");
@@ -168,10 +168,10 @@ export default function VegetationAnalyzer() {
       inputRecord: [{label:"Location",value:(typeof location!=="undefined"&&location)||"(not stated)"}],
       findings: [{ title: "Analysis output", text: buildReportText() }],
       chartNote: "Reference planting palette is reproduced in the PDF export.",
-      chartsHtml: tableHTML(["Species", "Type", "Water", "Shade", "Origin"],
-          PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin]), "Reference planting palette"),
+      chartsHtml: (PLANT_PALETTE.length ? tableHTML(["Species", "Type", "Water", "Shade", "Origin"],
+          PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin]), "Reference planting palette") : ""),
       interpretation: insight?.conclusion || "",
-      conclusions: (insight?.recommendations || []).map((r)=>typeof r==="string"?r:(r.recommendation||"")),
+      conclusions: (insight?.suggested_species || []).map((r) => typeof r === "string" ? r : `${r.name || r.species || ""}: ${r.reason || ""}`),
       runLimitations: [],
       extraRefs: [],
       overflow: overflowText,
@@ -209,8 +209,7 @@ export default function VegetationAnalyzer() {
             {researching ? "Researching..." : "Research Planting Palette for This Location"}
           </button>
           <p className="text-[10px] text-brand-text/60">
-            Optional. Without this, the built-in reference data below is used - which was compiled for a hot-arid
-            Gulf climate and may not suit other regions. Researching replaces it with data for your location.
+            Required. Planting is entirely climate- and region-specific, so the tool researches a palette for your location rather than assuming one. Nothing is suggested until this is done.
           </p>
           {researchNote && <p className="text-xs text-brand-success">{researchNote}</p>}
           {researchError && <p className="text-xs text-brand-danger">{friendlyError(researchError)}</p>}
@@ -267,7 +266,7 @@ export default function VegetationAnalyzer() {
         <div className="px-4 py-3 border-b border-brand-border flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">General Reference Palette</h2>
-            <p className="text-[10px] text-brand-text/60 mt-0.5">A regional reference list, NOT yet matched to this specific site - that matching happens in the AI Insight below. Research the location above to replace it with a palette for your region.</p>
+            <p className="text-[10px] text-brand-text/60 mt-0.5">Researched for your location, NOT yet matched to this specific site - that matching happens in the AI Insight below.</p>
           </div>
           <select value={waterFilter} onChange={(e) => setWaterFilter(e.target.value)} className="text-xs bg-[#F7F5F1] border border-brand-border rounded px-2 py-1"><option value="all">All water needs</option><option value="Low">Low water only</option><option value="Medium">Medium water</option><option value="High">High water (flagged)</option></select>
         </div>

@@ -188,10 +188,9 @@ export default function SurveyAnalyzer() {
       lines.push("");
     });
     if (analysis) {
-      Object.entries(analysis.text_theme_analysis || {}).forEach(([q, themes]) => {
-        lines.push(`${q.toUpperCase()} - THEMES`);
-        themes.forEach((t) => lines.push(`  ${t.theme} (${t.count}): ${t.recommendation}`));
-        lines.push("");
+      (analysis.themes || []).forEach((t) => {
+        lines.push(`  ${t.theme} (${t.count} responses): ${t.design_response || ""}`);
+        if (t.representative_quote) lines.push(`     "${t.representative_quote}"`);
       });
       if (analysis.red_flags?.length) { lines.push("RED FLAGS"); analysis.red_flags.forEach((f) => lines.push(`  - ${f}`)); lines.push(""); }
       lines.push("OVERALL SUMMARY", analysis.overall_summary || "", "");
@@ -321,21 +320,48 @@ export default function SurveyAnalyzer() {
             </div>
           ))}
 
-          {analysis && Object.entries(analysis.text_theme_analysis || {}).map(([q, themes], i) => (
-            <div key={i} className="bg-white rounded-lg border border-brand-border p-4">
-              <h3 className="text-sm font-semibold mb-3">{q} <span className="text-[10px] font-normal text-brand-text/60 uppercase">(AI-clustered themes)</span></h3>
-              <ResponsiveContainer width="100%" height={Math.max(120, themes.length * 32)}>
-                <BarChart data={themes} layout="vertical" margin={{ left: 20 }}>
+          {analysis && (analysis.themes || []).length > 0 && (
+            <div className="bg-white rounded-lg border border-brand-border p-4">
+              <h3 className="text-sm font-semibold mb-3">Design themes <span className="text-[10px] font-normal text-brand-text/60 uppercase">(AI-clustered from responses)</span></h3>
+              <ResponsiveContainer width="100%" height={Math.max(140, analysis.themes.length * 34)}>
+                <BarChart data={analysis.themes} layout="vertical" margin={{ left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D5" horizontal={false} />
                   <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <YAxis type="category" dataKey="theme" tick={{ fontSize: 11 }} width={140} />
+                  <YAxis type="category" dataKey="theme" tick={{ fontSize: 11 }} width={150} />
                   <Tooltip />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>{themes.map((_, idx) => <Cell key={idx} fill={COLORS[idx % COLORS.length]} />)}</Bar>
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                    {analysis.themes.map((_, idx) => <Cell key={idx} fill={COLORS[idx % COLORS.length]} />)}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
-              <div className="mt-3 space-y-1.5">{themes.map((t, idx) => (<p key={idx} className="text-xs text-[#3A362C]"><span className="font-semibold">{t.theme}</span> ({t.count}): {t.recommendation}</p>))}</div>
+              <div className="mt-3 space-y-2">
+                {analysis.themes.map((t, idx) => (
+                  <div key={idx} className="text-xs text-[#3A362C]">
+                    <p><span className="font-semibold">{t.theme}</span> ({t.count} responses): {t.design_response}</p>
+                    {t.representative_quote && <p className="text-[11px] italic text-brand-text/70 pl-3">"{t.representative_quote}"</p>}
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
+          )}
+
+          {analysis && (analysis.demographic_patterns || []).length > 0 && (
+            <div className="bg-white rounded-lg border border-brand-border p-4">
+              <h3 className="text-sm font-semibold mb-2">Demographic patterns</h3>
+              {analysis.demographic_patterns.map((d, i) => (
+                <p key={i} className="text-xs text-[#3A362C]"><span className="font-semibold">{d.group}:</span> {d.distinct_need}</p>
+              ))}
+            </div>
+          )}
+
+          {analysis && (analysis.conflicts || []).length > 0 && (
+            <div className="bg-white rounded-lg border border-brand-border p-4">
+              <h3 className="text-sm font-semibold mb-2">Conflicting needs</h3>
+              {analysis.conflicts.map((c, i) => (
+                <p key={i} className="text-xs text-[#3A362C]"><span className="font-semibold text-brand-danger">{c.tension}</span> - <span className="text-brand-success">{c.resolution}</span></p>
+              ))}
+            </div>
+          )}
 
           <div className="bg-white rounded-lg border border-brand-border p-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-2">Overall Summary & Red Flags</h2>

@@ -6,7 +6,7 @@ import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, windRoseSVG } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DEFAULT_SEASONS = [
@@ -21,7 +21,7 @@ const RISK_COLOR = { Low: "#3D7A5C", Medium: "#B8863B", High: "#B84C3D" };
 export default function WindAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
-  const [SEASONS, setSeasons] = useState(DEFAULT_SEASONS);
+  const [SEASONS, setSeasons] = useState([]);
   const [researching, setResearching] = useState(false);
   const [researchNote, setResearchNote] = useState("");
   const [researchError, setResearchError] = useState("");
@@ -176,8 +176,11 @@ export default function WindAnalyzer() {
         { title: "Zone assessment", headers: ["Zone", "Wants cooling", "Has screening", "Assessment"],
           rows: zones.filter((z) => z.name.trim()).map((z) => [z.name, z.wantsCooling ? "Yes" : "No", z.hasScreening ? "Yes" : "No", zoneFlag(z).label]) },
       ],
-      chartNote: "Seasonal wind reference table is reproduced in the PDF export.",
-      chartsHtml: tableHTML(["Season", "Prevailing", "Speed", "Dust risk", "Character"],
+      chartNote: "Wind rose, pedestrian comfort assessment and seasonal reference table are reproduced in the PDF export.",
+      chartsHtml: (SEASONS.length ? `<div style="margin:12px 0;">${windRoseSVG(SEASONS, "Seasonal wind rose")}</div>` : "") +
+        tableHTML(["Season", "Speed", "Sitting <=10", "Standing <=14", "Strolling <=17", "Walking <=20", "Safety >=90"],
+          comfortRows(), "Pedestrian wind comfort assessment (City of Ottawa criteria)") +
+        tableHTML(["Season", "Prevailing", "Speed", "Dust risk", "Character"],
           SEASONS.map((s) => [s.label, s.prevailing, s.speedRange, s.dustRisk, s.character]), "Seasonal wind reference"),
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
@@ -215,11 +218,10 @@ export default function WindAnalyzer() {
             placeholder="e.g. Al Safa 2 Park, Jumeirah, Dubai"
             className="input" />
           <button onClick={researchLocation} disabled={researching || !apiKey} className="btn-gold w-full">
-            {researching ? "Researching..." : "Research Wind Data for This Location"}
+            {researching ? "Researching wind data..." : "Research Wind Data for This Location"}
           </button>
           <p className="text-[10px] text-brand-text/60">
-            Optional. Without this, the built-in reference data below is used - which was compiled for a hot-arid
-            Gulf climate and may not suit other regions. Researching replaces it with data for your location.
+            Required. Wind characteristics are entirely location-specific, so the tool researches them for your site rather than assuming a region. Nothing is analysed until this is done.
           </p>
           {researchNote && <p className="text-xs text-brand-success">{researchNote}</p>}
           {researchError && <p className="text-xs text-brand-danger">{friendlyError(researchError)}</p>}
@@ -261,11 +263,14 @@ export default function WindAnalyzer() {
       <div className="bg-white rounded-lg border border-brand-border overflow-hidden">
         <button onClick={() => setShowRef((v) => !v)} className="w-full px-4 py-3 border-b border-brand-border flex items-center justify-between text-left">
           <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">
-            Seasonal Wind Reference {researchNote ? "" : "(built-in default)"}
+            Seasonal Wind Reference {SEASONS.length ? "" : "(not yet researched)"}
           </h2>
           <span className="text-xs text-brand-text">{showRef ? "Hide" : "Show"}</span>
         </button>
-        {showRef && (
+        {showRef && !SEASONS.length && (
+          <div className="p-4"><p className="text-xs text-brand-text">No wind data yet. Enter a project location above and research it - the tool does not assume a climate region.</p></div>
+        )}
+        {showRef && SEASONS.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="text-left text-brand-text/60 text-xs uppercase tracking-wide border-b border-brand-border"><th className="px-4 py-2">Season</th><th className="px-4 py-2">Prevailing</th><th className="px-4 py-2">Speed</th><th className="px-4 py-2">Dust Risk</th><th className="px-4 py-2">Character</th></tr></thead>

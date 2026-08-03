@@ -43,14 +43,18 @@ export const TOOL_SPECS = {
       "air temperature, humidity, radiant or surface temperature, wind cooling, and thermal comfort simulation.",
     deterministic: [
       "Sun elevation and azimuth computed using the NOAA General Solar Position Calculations (declination, equation of time, hour angle)",
-      "Per-zone exposure hours derived by comparing computed sun direction against user-declared existing shade",
+      "Clear-sky solar irradiance computed with the ASHRAE clear-sky model, integrated to give daily insolation in kWh/m2 - the metric professional solar analysis reports",
+      "Per-zone exposure hours derived by comparing computed sun direction against declared existing shade",
+      "Shadow length per metre of height derived from computed peak sun elevation",
     ],
     inferential: [
       "Resolution of a location description to latitude, longitude and UTC offset",
       "Shade strategy recommendation per zone",
     ],
     limitations: [
-      "Sun position is geometric. Atmospheric refraction, dust attenuation, cloud cover and urban heat island effects are not modelled.",
+      "Sun position is geometric. Atmospheric refraction and urban heat island effects are not modelled.",
+      "Insolation figures are CLEAR-SKY. No cloud cover, aerosol, dust or humidity attenuation is applied, so values are an upper bound. Real annual yield at a given site is typically lower and requires measured meteorological data (a TMY dataset) or a tool such as Autodesk Insight for a model-based cumulative study.",
+      "This is a site-level solar study, not a surface-by-surface insolation analysis of a 3D model. It does not compute shading cast by specific proposed built form.",
       "Existing shade is recorded as user-declared compass directions per zone, not as surveyed canopy or building geometry.",
       "Heat tier thresholds are a comparative convention for ranking exposure, not a temperature measurement.",
       "Resolved coordinates are AI-derived from a location description and should be confirmed against survey data.",
@@ -60,6 +64,8 @@ export const TOOL_SPECS = {
         u: "https://gml.noaa.gov/grad/solcalc/solareqns.PDF" },
       { t: "Solar Calculator - calculation details (after Meeus, Astronomical Algorithms)", o: "NOAA GML", y: "",
         u: "https://gml.noaa.gov/grad/solcalc/calcdetails.html" },
+      { t: "Clear-sky irradiance model (A, B, C coefficient method)", o: "ASHRAE Handbook of Fundamentals", y: "", u: "" },
+      { t: "Park Design Guidelines - shade coverage requirements", o: "Delhi Urban Art Commission", y: "", u: "" },
     ],
     convention:
       "Solar analysis should state the reference days used and the latitude applied, so results are reproducible by a third party.",
@@ -99,6 +105,7 @@ export const TOOL_SPECS = {
       "computational fluid dynamics, turbulence modelling, pressure loads on structures, and pollutant dispersion.",
     deterministic: [
       "Per-zone exposure logic comparing zone orientation and declared existing shelter against stated prevailing directions",
+      "Assessment of stated peak wind speeds against published pedestrian comfort thresholds (sitting, standing, strolling, walking) and the wind safety limit",
     ],
     inferential: [
       "Retrieval and interpretation of prevailing and seasonal wind characteristics for the supplied location",
@@ -106,12 +113,16 @@ export const TOOL_SPECS = {
     ],
     limitations: [
       "Wind characterisation is drawn from general published climate information for the location, not from site-specific meteorological station data. It should be corroborated before design freeze.",
-      "No airflow simulation is performed. Recommendations follow directional reasoning, not modelled velocity or pressure.",
+      "No airflow simulation is performed. Professional practice for a full pedestrian-level wind study uses either wind tunnel testing or computational fluid dynamics against a 3D model of the proposed massing and its surroundings; neither is performed here.",
+      "The wind rose is schematic - built from stated prevailing directions and peak speeds, not from hourly meteorological station records. A defensible study uses a long record (the City of Ottawa terms of reference require a minimum of 30 years of hourly data from a named station).",
+      "Comfort thresholds are applied to a stated seasonal peak, not to a measured exceedance distribution. Published criteria are defined on an exceedance basis (typically the speed exceeded no more than 20 per cent of the time).",
       "Local obstructions - adjacent buildings, existing planting - are accounted for only insofar as the user declares them.",
     ],
-    refs: [],
+    refs: [
+      { t: "Wind Analysis - Terms of Reference (pedestrian comfort and safety criteria)", o: "City of Ottawa", y: "", u: "" },
+    ],
     convention:
-      "Wind reporting should distinguish prevailing direction from seasonal variation, and state whether the data source is site-specific or regional.",
+      "Wind reporting should distinguish prevailing direction from seasonal variation, state whether the data source is site-specific or regional, and assess results against published pedestrian comfort criteria rather than describing conditions qualitatively.",
   },
 
   VEG: {
@@ -625,6 +636,132 @@ export function barChartSVG(items = [], { title = "", unit = "", color = "#C9A46
     svg += `<rect x="${labelW}" y="${y + 3}" width="${bw}" height="12" fill="${it.color || color}" rx="2"/>`;
     svg += `<text x="${labelW + bw + 6}" y="${y + 13}" font-family="Arial" font-size="9" fill="#1C2333">${esc(it.display != null ? it.display : it.value)}${esc(unit)}</text>`;
   });
+  svg += `</svg>`;
+  return svg;
+}
+
+/** Sun-path compass: where solar exposure arrives from, by intensity, plus shaded arcs.
+ *  points: [{az, elev, tier, hourLabel}]  shadedDirs: ["N","NE"...] */
+export function sunPathCompassSVG(points = [], shadedDirs = [], title = "") {
+  if (!points.length) return "";
+  const size = 360, cx = size / 2, cy = size / 2 + 12, R = 130;
+  const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const TIER = { High: "#B84C3D", Medium: "#B8863B", Low: "#3D7A5C" };
+  const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size + 40}" width="${size}" height="${size + 40}" font-family="Arial, Helvetica, sans-serif">`;
+  svg += `<rect width="${size}" height="${size + 40}" fill="#ffffff"/>`;
+  if (title) svg += `<text x="${cx}" y="18" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C2333">${esc(title)}</text>`;
+
+  // shaded sectors (45 deg each) drawn first
+  shadedDirs.forEach((d) => {
+    const i = DIRS.indexOf(d);
+    if (i < 0) return;
+    const a0 = ((i * 45 - 22.5 - 90) * Math.PI) / 180;
+    const a1 = ((i * 45 + 22.5 - 90) * Math.PI) / 180;
+    const x0 = cx + R * Math.cos(a0), y0 = cy + R * Math.sin(a0);
+    const x1 = cx + R * Math.cos(a1), y1 = cy + R * Math.sin(a1);
+    svg += `<path d="M ${cx} ${cy} L ${x0} ${y0} A ${R} ${R} 0 0 1 ${x1} ${y1} Z" fill="#3D7A5C" fill-opacity="0.13"/>`;
+  });
+
+  // rings = elevation (centre 90 deg, edge horizon)
+  [0.33, 0.66, 1].forEach((f) => {
+    svg += `<circle cx="${cx}" cy="${cy}" r="${R * f}" fill="none" stroke="#E8E2D5"/>`;
+  });
+  svg += `<text x="${cx + 3}" y="${cy - R * 0.33 + 10}" font-size="7" fill="#C9C6BE">60 deg</text>`;
+  svg += `<text x="${cx + 3}" y="${cy - R * 0.66 + 10}" font-size="7" fill="#C9C6BE">30 deg</text>`;
+
+  // compass labels + spokes
+  DIRS.forEach((d, i) => {
+    const a = ((i * 45 - 90) * Math.PI) / 180;
+    svg += `<line x1="${cx}" y1="${cy}" x2="${cx + R * Math.cos(a)}" y2="${cy + R * Math.sin(a)}" stroke="#F0EBDF"/>`;
+    const lx = cx + (R + 14) * Math.cos(a), ly = cy + (R + 14) * Math.sin(a) + 3;
+    svg += `<text x="${lx}" y="${ly}" text-anchor="middle" font-size="10" font-weight="bold" fill="#1C2333">${d}</text>`;
+  });
+
+  // sun path points: radius from elevation (90 deg = centre)
+  points.forEach((pt) => {
+    const rr = R * (1 - Math.max(0, Math.min(90, pt.elev)) / 90);
+    const a = ((pt.az - 90) * Math.PI) / 180;
+    const x = cx + rr * Math.cos(a), y = cy + rr * Math.sin(a);
+    svg += `<circle cx="${x}" cy="${y}" r="${pt.tier === "High" ? 5 : pt.tier === "Medium" ? 4 : 3}" fill="${TIER[pt.tier] || "#5A5445"}" fill-opacity="0.9"/>`;
+  });
+  // label a few hours
+  points.filter((_, i) => i % 4 === 0).forEach((pt) => {
+    const rr = R * (1 - Math.max(0, Math.min(90, pt.elev)) / 90);
+    const a = ((pt.az - 90) * Math.PI) / 180;
+    svg += `<text x="${cx + rr * Math.cos(a) + 7}" y="${cy + rr * Math.sin(a) + 3}" font-size="7" fill="#5A5445">${esc(pt.hourLabel)}</text>`;
+  });
+
+  // legend
+  const ly = size + 14;
+  let lx = 16;
+  [["High", "High heat (above 55 deg)"], ["Medium", "Medium (25-55 deg)"], ["Low", "Low (below 25 deg)"]].forEach(([k, lab]) => {
+    svg += `<circle cx="${lx}" cy="${ly - 3}" r="4" fill="${TIER[k]}"/><text x="${lx + 8}" y="${ly}" font-size="8" fill="#5A5445">${esc(lab)}</text>`;
+    lx += 108;
+  });
+  svg += `<rect x="16" y="${ly + 8}" width="10" height="8" fill="#3D7A5C" fill-opacity="0.13"/><text x="30" y="${ly + 15}" font-size="8" fill="#5A5445">Shaded direction (existing)</text>`;
+  svg += `<text x="${cx}" y="${ly + 28}" text-anchor="middle" font-size="7" fill="#8A8474">Centre = sun overhead. Edge = horizon. Computed via NOAA solar position algorithm.</text>`;
+  svg += `</svg>`;
+  return svg;
+}
+
+/** Wind rose: directional frequency/speed petals by season.
+ *  seasons: [{label, prevailing:"NW", speedRange:"15-30 km/h", dustRisk}]
+ *  This is a SCHEMATIC rose built from stated prevailing directions and speed ranges,
+ *  not from hourly meteorological station records - stated on the diagram itself. */
+export function windRoseSVG(seasons = [], title = "") {
+  if (!seasons.length) return "";
+  const size = 360, cx = size / 2, cy = size / 2 + 10, R = 125;
+  const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const DIRS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  const SEASON_COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B"];
+  const dirIndex = (name) => {
+    const key = String(name || "").toUpperCase().replace(/[^NSEW]/g, "");
+    const i = DIRS.indexOf(key);
+    return i >= 0 ? i : DIRS.indexOf(key.slice(0, 2)) >= 0 ? DIRS.indexOf(key.slice(0, 2)) : -1;
+  };
+  const topSpeed = (r) => { const n = String(r || "").match(/\d+/g); return n ? Math.max(...n.map(Number)) : 0; };
+  const maxSpeed = Math.max(10, ...seasons.map((sn) => topSpeed(sn.speedRange)));
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size + 56}" width="${size}" height="${size + 56}" font-family="Arial, Helvetica, sans-serif">`;
+  svg += `<rect width="${size}" height="${size + 56}" fill="#ffffff"/>`;
+  if (title) svg += `<text x="${cx}" y="18" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C2333">${esc(title)}</text>`;
+
+  // speed rings
+  [0.33, 0.66, 1].forEach((f) => {
+    svg += `<circle cx="${cx}" cy="${cy}" r="${R * f}" fill="none" stroke="#E8E2D5"/>`;
+    svg += `<text x="${cx + 3}" y="${cy - R * f + 10}" font-size="7" fill="#C9C6BE">${Math.round(maxSpeed * f)} km/h</text>`;
+  });
+  // 8 spokes + labels
+  ["N", "NE", "E", "SE", "S", "SW", "W", "NW"].forEach((d, i) => {
+    const a = ((i * 45 - 90) * Math.PI) / 180;
+    svg += `<line x1="${cx}" y1="${cy}" x2="${cx + R * Math.cos(a)}" y2="${cy + R * Math.sin(a)}" stroke="#F0EBDF"/>`;
+    svg += `<text x="${cx + (R + 14) * Math.cos(a)}" y="${cy + (R + 14) * Math.sin(a) + 3}" text-anchor="middle" font-size="10" font-weight="bold" fill="#1C2333">${d}</text>`;
+  });
+
+  // petals - one per season, pointing FROM the prevailing direction
+  seasons.forEach((sn, si) => {
+    const idx = dirIndex(sn.prevailing);
+    if (idx < 0) return;
+    const speed = topSpeed(sn.speedRange);
+    const len = R * (speed / maxSpeed);
+    const ang = (idx * 22.5 - 90) * Math.PI / 180;
+    const w = 11 * Math.PI / 180;
+    const x1 = cx + len * Math.cos(ang - w), y1 = cy + len * Math.sin(ang - w);
+    const x2 = cx + len * Math.cos(ang + w), y2 = cy + len * Math.sin(ang + w);
+    svg += `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${len} ${len} 0 0 1 ${x2} ${y2} Z" fill="${SEASON_COLORS[si % 4]}" fill-opacity="0.62" stroke="${SEASON_COLORS[si % 4]}"/>`;
+    svg += `<text x="${cx + (len + 9) * Math.cos(ang)}" y="${cy + (len + 9) * Math.sin(ang) + 3}" text-anchor="middle" font-size="7.5" fill="${SEASON_COLORS[si % 4]}" font-weight="bold">${speed}</text>`;
+  });
+
+  // legend
+  let ly = size + 16, lx = 14;
+  seasons.forEach((sn, si) => {
+    svg += `<rect x="${lx}" y="${ly - 7}" width="9" height="9" fill="${SEASON_COLORS[si % 4]}" fill-opacity="0.62"/>`;
+    svg += `<text x="${lx + 13}" y="${ly}" font-size="7.5" fill="#5A5445">${esc(String(sn.label || "").slice(0, 20))} ${esc(sn.prevailing || "")}</text>`;
+    lx += 88;
+    if (lx > size - 70) { lx = 14; ly += 13; }
+  });
+  svg += `<text x="${cx}" y="${size + 50}" text-anchor="middle" font-size="7" fill="#8A8474">Schematic rose from stated prevailing directions and peak speeds - not hourly station records. Petal length = peak speed. Wind blows FROM the labelled direction.</text>`;
   svg += `</svg>`;
   return svg;
 }
