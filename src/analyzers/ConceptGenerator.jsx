@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Layers } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
@@ -62,6 +63,40 @@ export default function ConceptGenerator() {
   const [recLoading, setRecLoading] = useState(false);
   const [recError, setRecError] = useState("");
 
+  const [locationCtx, setLocationCtx] = useState("");
+  const [ctxLoading, setCtxLoading] = useState(false);
+  const [ctxError, setCtxError] = useState("");
+  const [projectLocation, setProjectLocation] = useState("");
+
+  // Researches how comparable spaces are actually designed at this location, so concepts
+  // respond to real local practice rather than generic park thinking.
+  async function researchLocalContext() {
+    if (!projectLocation.trim()) { setCtxError("Enter the project location first."); return; }
+    setCtxLoading(true); setCtxError("");
+    try {
+      const text = await callAI({
+        provider, apiKey, maxTokens: 2200, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
+        content:
+          `For a public open space / park project at "${projectLocation}", research and report what genuinely informs design there. ` +
+          "Cover: (a) comparable public spaces in that city or region and what they actually provide, " +
+          "(b) planning or design standards that govern public open space there, " +
+          "(c) climate-driven design responses that are standard local practice, " +
+          "(d) cultural or social use patterns that shape how public space is used locally, " +
+          "(e) typical facility mixes for this kind of space in that context. " +
+          "Report only what you can attribute to a real source or established local practice - mark anything uncertain as 'unverified'. " +
+          "Respond with ONLY valid JSON, no markdown fences: {\"comparable_projects\":[{\"name\":\"\",\"where\":\"\",\"relevant_lesson\":\"\"}]," +
+          "\"local_standards\":[{\"standard\":\"\",\"requirement\":\"\",\"source\":\"\"}]," +
+          "\"climate_responses\":[\"\"],\"cultural_use_patterns\":[\"\"],\"typical_facilities\":[\"\"],\"unverified_notes\":[\"\"]}",
+      });
+      const parsed = extractJSON(text);
+      if (!parsed) throw new Error("The research came back in an unexpected format. Try again.");
+      setLocationCtx(JSON.stringify(parsed, null, 2));
+    } catch (e) {
+      setCtxError(e.message || "Could not research local context.");
+    } finally { setCtxLoading(false); }
+  }
+
   async function generateConcepts() {
     if (!brief.trim()) { setError("Paste your site analysis findings and program requirements above first."); return; }
     setLoading(true); setError(""); setConcepts(null); setRecommendation(null);
@@ -72,7 +107,7 @@ export default function ConceptGenerator() {
           `You are a landscape architecture concept-design assistant. Given the site analysis findings and program brief below, generate ${numConcepts} DISTINCT zoning concept variants for a park redesign. Each concept should meaningfully differ in spatial organization, not just wording. ` +
           "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point), facilities (array of short strings naming the BUILT facilities in that zone, e.g. 'shade pergola', 'play equipment', 'cafe kiosk', 'paved plaza' - these feed a cost estimate so be concrete and complete)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
           "Every zone rationale MUST reference something specific from the brief - no generic rationale. " +
-          `Respond with ONLY a valid JSON array of ${numConcepts} concept objects, no markdown fences.\n\nSITE ANALYSIS & PROGRAM BRIEF:\n${brief}`,
+          `Respond with ONLY a valid JSON array of ${numConcepts} concept objects, no markdown fences.` + checklistPrompt("CPT") + (locationCtx ? `\n\nRESEARCHED LOCAL CONTEXT for ${projectLocation} - use this so concepts respond to real local practice, and say in a zone rationale where a concept follows or deliberately departs from it:\n${locationCtx}` : "") + `\n\nSITE ANALYSIS & PROGRAM BRIEF:\n${brief}`,
       });
       const parsed = extractJSON(text);
       if (!Array.isArray(parsed)) throw new Error("Expected a list of concepts but got something else. Try again.");
@@ -121,6 +156,8 @@ export default function ConceptGenerator() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [webSources, setWebSources] = useState([]);
+  const [groundingNote, setGroundingNote] = useState("");
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -145,7 +182,7 @@ export default function ConceptGenerator() {
       interpretation: recommendation ? `${recommendation.recommendation || ""}${recommendation.tradeoffs ? "\n\nTrade-offs: " + recommendation.tradeoffs : ""}` : "",
       conclusions: recommendation ? [recommendation.recommendation, recommendation.tradeoffs].filter(Boolean) : [],
       runLimitations: [],
-      extraRefs: [],
+      extraRefs: webSources,
       overflow: overflowText,
     };
   }
@@ -183,6 +220,27 @@ export default function ConceptGenerator() {
         <div className="card-header">Step 1 - Site Findings & Program Brief</div>
         <div className="p-4 space-y-3">
           <textarea value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Paste your key site analysis findings (adjacencies, sun/wind exposure, survey themes, accessibility constraints) and the required program/facility list here..." rows={9} className="textarea" />
+          <div className="border border-brand-border rounded-lg p-3 space-y-2">
+            <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">Project location - research local practice (recommended)</label>
+            <p className="text-[10px] text-brand-text/60">
+              Researches comparable spaces, governing standards, climate responses and local use patterns for this
+              location, so concepts respond to real local practice rather than generic park thinking. Each concept
+              then says where it follows or deliberately departs from it.
+            </p>
+            <input value={projectLocation} onChange={(e) => setProjectLocation(e.target.value)}
+              placeholder="e.g. Riverside Park, Chicago, USA" className="input" />
+            <button onClick={researchLocalContext} disabled={ctxLoading || !apiKey} className="btn-dark w-full">
+              <Sparkles size={15} /> {ctxLoading ? "Researching local practice..." : "Research Local Design Context"}
+            </button>
+            {ctxError && <p className="text-[11px] text-brand-danger">{friendlyError(ctxError)}</p>}
+            {locationCtx && (
+              <details className="text-[10px] text-brand-text">
+                <summary className="cursor-pointer text-brand-success">Local context researched - view what was found</summary>
+                <pre className="whitespace-pre-wrap mt-1 max-h-44 overflow-y-auto bg-[#F7F5F1] p-2 rounded border border-brand-border">{locationCtx}</pre>
+              </details>
+            )}
+          </div>
+
           <div>
             <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">Your own zone / facility ideas (optional)</label>
             <p className="text-[10px] text-brand-text/60 mb-1">

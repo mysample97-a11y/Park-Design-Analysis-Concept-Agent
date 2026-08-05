@@ -4,6 +4,7 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
@@ -27,7 +28,8 @@ export default function VegetationAnalyzer() {
     setResearching(true); setResearchError("");
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 3000, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 3000, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `For the location "${location}", give a reference planting palette of 10-14 species suitable for public landscape there, prioritising native and climate-adapted species. Respond with ONLY a JSON array, no markdown fences: [{"id":"short_id","name":"Common name (Botanical name)","type":"Canopy Tree|Palm|Shrub|Groundcover|Accent","water":"Low|Medium|High","shade":"Full Sun|Part Shade|Shade","origin":"Native|Adaptive|Introduced - note"}]. Use real species that genuinely grow in that climate. Do not invent species.`,
       });
       const parsed = extractJSON(text);
@@ -119,7 +121,7 @@ export default function VegetationAnalyzer() {
           "(2) 'inventory_guidance': 1-2 sentences on how any existing inventory should inform retain/remove decisions (or note if none was provided), " +
           "(3) 'suggested_species': an array of 3-5 objects {name, reason} - species FROM THE REFERENCE PALETTE ONLY, each with a one-line reason tied to this site's actual conditions, " +
           "(4) 'conclusion': 2-3 sentences giving the single clearest planting/terrain/soil action to take next. " +
-          "Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+          "Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("VEG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {
@@ -146,6 +148,8 @@ export default function VegetationAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [webSources, setWebSources] = useState([]);
+  const [groundingNote, setGroundingNote] = useState("");
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -159,7 +163,7 @@ export default function VegetationAnalyzer() {
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.suggested_species || []).map((r) => typeof r === "string" ? r : `${r.name || r.species || ""}: ${r.reason || ""}`),
       runLimitations: [],
-      extraRefs: [],
+      extraRefs: webSources,
       overflow: overflowText,
     };
   }
@@ -296,6 +300,13 @@ export default function VegetationAnalyzer() {
       )}
 
       <div className="card">
+        <ReportPreview
+          reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+          chartsHtml={structuredOpts().chartsHtml}
+          includeOverflow={includeOverflow}
+          setIncludeOverflow={setIncludeOverflow}
+        />
+
         <div className="p-4">
           <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h2>
           <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />

@@ -4,6 +4,7 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, windRoseSVG } from "../utils/reportTemplate";
@@ -26,7 +27,8 @@ export default function WindAnalyzer() {
     setResearching(true); setResearchError("");
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 1400, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 1400, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `For the location "${location}", give the prevailing seasonal wind characteristics. Respond with ONLY a JSON array of 4 season objects, no markdown fences: [{"id":"winter","label":"Winter (months)","prevailing":"compass direction","speedRange":"x-y km/h","character":"one sentence","dustRisk":"Low|Medium|High"}]. Use the four seasons appropriate to that location's climate. Base this on published climate references; do not invent precise wind-rose percentages.`,
       });
       const parsed = extractJSON(text);
@@ -113,7 +115,7 @@ export default function WindAnalyzer() {
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 2500,
-        content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"conclusion\": \"\"}\n\nDATA:\n" + checklistPrompt("WND") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {
@@ -139,6 +141,8 @@ export default function WindAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [webSources, setWebSources] = useState([]);
+  const [groundingNote, setGroundingNote] = useState("");
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -179,7 +183,7 @@ export default function WindAnalyzer() {
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
       runLimitations: [],
-      extraRefs: [],
+      extraRefs: webSources,
       overflow: overflowText,
     };
   }
@@ -297,6 +301,13 @@ export default function WindAnalyzer() {
       )}
 
       <div className="card">
+        <ReportPreview
+          reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+          chartsHtml={structuredOpts().chartsHtml}
+          includeOverflow={includeOverflow}
+          setIncludeOverflow={setIncludeOverflow}
+        />
+
         <div className="p-4">
           <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h2>
           <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />

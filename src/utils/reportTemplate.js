@@ -10,6 +10,9 @@
 
 export const TOOL_SPECS = {
   SCX: {
+    needs: "A project location is the minimum. A site plan, GIS extract or satellite screenshot makes a substantial difference - without one the tool has no spatial context beyond what is published in text.",
+    needsImages: true,
+    needsWebSearch: true,
     inputs: "A project location, plus a description of what surrounds the site (or a GIS/map image). Optionally add zones with areas, and paths/ramps with widths, to run capacity and accessibility checks.",
     name: "Site Context & Accessibility Analysis",
     covers:
@@ -35,6 +38,8 @@ export const TOOL_SPECS = {
   },
 
   SOL: {
+    needs: "A project location. Nothing else is required - zones and likely existing shade are proposed by the tool, and the analysis runs site-wide without them.",
+    needsWebSearch: true,
     inputs: "A project location. The tool resolves it to coordinates and computes sun positions. Optionally add zones and mark which compass directions are already shaded.",
     name: "Solar Exposure Analysis",
     covers:
@@ -72,6 +77,8 @@ export const TOOL_SPECS = {
   },
 
   SUR: {
+    needs: "Survey responses as .xlsx, .csv or pasted text, including the header row. A photograph of a paper survey sheet also works. Without a stated response count and recruitment method, results cannot be called representative.",
+    needsImages: true,
     inputs: "Community survey responses, pasted as CSV or uploaded. Include the question headers row.",
     name: "Community Survey Analysis",
     covers:
@@ -97,6 +104,8 @@ export const TOOL_SPECS = {
   },
 
   WND: {
+    needs: "A project location, then research it - wind data is entirely location-specific and the tool holds no default climate. Nothing is analysed until the research step is run.",
+    needsWebSearch: true,
     inputs: "A project location. Optionally research it to replace the built-in reference data, then add zones to assess exposure.",
     name: "Wind Exposure Analysis",
     covers:
@@ -126,6 +135,9 @@ export const TOOL_SPECS = {
   },
 
   VEG: {
+    needs: "A project location, then research the palette. Site photographs are strongly recommended - they are the only way the tool sees existing planting and its condition.",
+    needsImages: true,
+    needsWebSearch: true,
     inputs: "A project location, plus a description or photograph of existing vegetation. Optionally research the location to replace the built-in planting palette.",
     name: "Vegetation, Terrain and Soil Analysis",
     covers:
@@ -152,6 +164,8 @@ export const TOOL_SPECS = {
   },
 
   CPT: {
+    needsWebSearch: true,
+    needs: "A site analysis brief. The Consolidator produces one in exactly the right format. A total site area is needed for the bubble diagrams to carry real areas for cost estimating.",
     inputs: "A site analysis brief - the findings, constraints and programme requirements the concepts must respond to. The Combined Document Generator produces one in the right format.",
     name: "Concept Options Report",
     covers:
@@ -163,6 +177,7 @@ export const TOOL_SPECS = {
       "Arithmetic averaging of criterion scores into an overall score",
     ],
     inferential: [
+      "Research of comparable spaces, governing standards and local design practice at the project location (Claude web search / Gemini Google Search grounding)",
       "Generation of the concept variants themselves",
       "Zone placement and the rationale linking each zone to a finding in the supplied brief",
       "Scoring of each concept against the stated criteria",
@@ -171,6 +186,7 @@ export const TOOL_SPECS = {
       "Scores are the model's structured judgment, not measurement. They are useful for ordering options for human deliberation; they are not evidence of design quality.",
       "Bubble diagrams are schematic representations of relative position and area. They are not survey-based geometry and carry no dimensional accuracy.",
       "Concept quality depends entirely on the quality and specificity of the supplied brief. A vague brief produces generic concepts.",
+      "Where local design context was researched, it reflects published sources and general practice - not a survey of local projects. Treat comparable-project references as leads to verify, not as established fact.",
       "Concepts require review by a qualified designer before selection.",
     ],
     refs: [],
@@ -179,6 +195,8 @@ export const TOOL_SPECS = {
   },
 
   BDG: {
+    needs: "A facility list with areas, plus a project location and currency so rates can be researched. Without rates every figure is zero.",
+    needsWebSearch: true,
     inputs: "A list of facilities with areas, or a text description the tool can extract them from. Rates and wrapper percentages are editable.",
     name: "Cost Estimate and Feasibility Report",
     covers:
@@ -208,25 +226,29 @@ export const TOOL_SPECS = {
   },
 
   CMB: {
+    needsWebSearch: true,
+    needs: "The outputs of the other tools, pasted or uploaded per section. At least three sections are needed before a synthesis is meaningful.",
     inputs: "The outputs of the other analysis tools, pasted or uploaded per section. At least three sections are needed to synthesise.",
     name: "Consolidated Analysis and Opportunities Report",
     covers:
       "synthesis of the supplied analysis sections into a cross-referenced constraints and opportunities matrix, a set of design implications, and a consolidated brief formatted for use in concept generation.",
     excludes:
-      "new analysis. This tool synthesises only what is supplied to it and introduces no independent findings.",
+      "new analysis within the synthesis itself. The constraints matrix, design implications and concept brief are built ONLY from what you supply. The optional Completeness Check does look outward - but its output is kept in a separate section and never merged into the matrix, so your findings and the model's commentary remain distinguishable.",
     deterministic: [
       "Parsing of supplied documents (.docx, .rtf, .txt) into text for synthesis",
       "Structural assembly of the compiled report from its constituent sections",
     ],
     inferential: [
       "Cross-referencing of findings across sections into themed constraint and opportunity pairs",
+      "Optional completeness check: reviewing the supplied analysis against what a competent study at this location would cover (both providers search live sources)",
       "Derivation of design implications from the matrix",
       "Composition of the consolidated concept brief",
     ],
     limitations: [
       "This report inherits every assumption and limitation of the sections supplied to it. It cannot be more reliable than its inputs.",
       "Synthesis is model-generated. Cross-references should be checked against the source sections before reliance.",
-      "Sections left empty by the user are simply absent from the synthesis; their absence is not flagged as a gap unless the user states it.",
+      "Sections left empty by the user are absent from the synthesis. Run the Completeness Check to have gaps identified explicitly.",
+      "The Completeness Check is model-generated commentary, not an audit. It may raise items that do not apply and may miss items that do. It requires human judgement before acting on.",
     ],
     refs: [],
     convention:

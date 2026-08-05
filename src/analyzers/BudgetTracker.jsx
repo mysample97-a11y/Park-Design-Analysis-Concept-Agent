@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
@@ -81,13 +82,17 @@ export default function BudgetTracker() {
     setComparing(true); setCompareError(""); setComparison(null);
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 3000, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 3000, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: "You are a cost consultant comparing park design concepts for affordability. For EACH concept, extract its facilities and areas, apply indicative construction unit rates for the stated location, and build an order-of-cost estimate using the RICS NRM1 cascade (measured works, then preliminaries, overheads and profit, contingency, inflation). " +
           "Then compare them. Return ONLY valid JSON, no markdown fences: {" +
           "\"concepts\":[{\"name\":\"\",\"estimated_capex\":0,\"largest_cost_driver\":\"the single facility contributing most\",\"driver_share_pct\":0,\"within_budget\":true,\"confidence\":\"Verified-Macro|Verified-Adjacent-Scale|Assumption-Flagged\"}]," +
-          "\"recommended\":\"name of the best-value concept\",\"recommendation_reason\":\"2-3 sentences on value for money, not just lowest cost\"," +
+          "\"recommended\":\"name of the most FEASIBLE concept - deliverable within the budget while retaining the most design value, which is not necessarily the cheapest\"," +
+          "\"recommendation_reason\":\"3-4 sentences: why this one is deliverable, what it retains that the others lose, and what the runner-up would have offered\"," +
+          "\"feasibility_notes\":[{\"concept\":\"\",\"verdict\":\"Deliverable|Deliverable with reductions|Not deliverable within budget\",\"reason\":\"\"}]," +
           "\"cost_reduction_options\":[{\"concept\":\"\",\"facility\":\"\",\"action\":\"reduce, substitute or combine - and the approximate saving\"}]," +
-          "\"hybrid_suggestion\":\"if elements of different concepts could be combined for better value, say how - otherwise empty string\"}. " +
+          "\"hybrid_suggestion\":\"if elements of different concepts could be combined for better value, say how - otherwise empty string\"," +
+          "\"decision_note\":\"one sentence stating plainly that this is a cost-based recommendation only and the design decision remains with the human designer\"}. " +
           "Mark every rate you could not source against a published benchmark as Assumption-Flagged. Do not present invented figures as verified.\n\n" +
           `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\n` +
           filled.map((x) => `CONCEPT ${x.i + 1}:\n${x.t}`).join("\n\n---\n\n"),
@@ -107,7 +112,8 @@ export default function BudgetTracker() {
     setResearching(true); setResearchError("");
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 2500, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 2500, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: "You are a cost consultant. For each facility below, give an indicative construction unit rate per square metre for the stated location and currency, based on published construction cost benchmarks you can actually cite (e.g. international construction cost indices, published market reports). " +
           "For each facility return: {name, rate_per_m2 (number), basis (the published source or benchmark type you based it on), confidence ('Verified-Macro' if from a published national/city index, 'Verified-Adjacent-Scale' if from a comparable project type, 'Assumption-Flagged' if you are inferring without a specific published benchmark)}. " +
           "Do NOT invent a precise figure and present it as verified - if you have no benchmark, give your best estimate and mark it Assumption-Flagged. " +
@@ -186,7 +192,7 @@ export default function BudgetTracker() {
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 2500,
-        content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: (1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high/low, (2) 'confidence_note': 1-2 sentences on which parts of this estimate rest on Assumption-Flagged rates and should be verified, (3) 'conclusion': 2-3 sentences on overall feasibility/next cost-planning step. Do not invent benchmark prices not present. Respond with ONLY valid JSON, no markdown fences: {\"observations\": [\"\"], \"confidence_note\": \"\", \"conclusion\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: (1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high/low, (2) 'confidence_note': 1-2 sentences on which parts of this estimate rest on Assumption-Flagged rates and should be verified, (3) 'conclusion': 2-3 sentences on overall feasibility/next cost-planning step. Do not invent benchmark prices not present. Respond with ONLY valid JSON, no markdown fences: {\"observations\": [\"\"], \"confidence_note\": \"\", \"conclusion\": \"\"}" + checklistPrompt("BDG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {
@@ -212,6 +218,8 @@ export default function BudgetTracker() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [webSources, setWebSources] = useState([]);
+  const [groundingNote, setGroundingNote] = useState("");
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -225,8 +233,16 @@ export default function BudgetTracker() {
           rows: wrapperRows.map((r) => [r.label, r.detail, formatNumber(r.amount), r.confidence || ""]) },
         ...(comparison ? [{ title: "Concept cost comparison",
           note: `Recommended: ${comparison.recommended}. ${comparison.recommendation_reason || ""}`,
-          headers: ["Concept", `Est. CAPEX ${currency}`, "Largest cost driver", "Within budget", "Confidence"],
-          rows: (comparison.concepts || []).map((c) => [c.name, formatNumber(c.estimated_capex), c.largest_cost_driver, c.within_budget ? "Yes" : "No", c.confidence]) }] : []),
+          headers: ["Concept", `Est. CAPEX ${currency}`, "Largest cost driver", "Feasibility verdict", "Confidence"],
+          rows: (comparison.concepts || []).map((c) => {
+            const fv = (comparison.feasibility_notes || []).find((f) => f.concept === c.name);
+            return [c.name, formatNumber(c.estimated_capex), c.largest_cost_driver, fv ? fv.verdict : (c.within_budget ? "Deliverable" : "Not deliverable within budget"), c.confidence];
+          }) },
+        { title: "Cost reduction options",
+          items: (comparison.cost_reduction_options || []).map((o) => `${o.concept} / ${o.facility}: ${o.action}`)
+            .concat(comparison.hybrid_suggestion ? [`Hybrid option: ${comparison.hybrid_suggestion}`] : []) },
+        { title: "Decision status",
+          text: comparison.decision_note || "This is a cost-based recommendation only. The design decision remains with the designer." }] : []),
       ],
       chartNote: "Cost build-up chart and facility schedule are reproduced in the PDF export.",
       chartsHtml: tableHTML(["Facility", "Area m2", "Rate", "Subtotal"],
@@ -237,7 +253,7 @@ export default function BudgetTracker() {
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.observations || []),
       runLimitations: [],
-      extraRefs: [],
+      extraRefs: webSources,
       overflow: overflowText,
     };
   }
@@ -445,6 +461,20 @@ export default function BudgetTracker() {
               <div className="rounded-lg border-2 p-3" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
                 <p className="text-sm text-brand-dark"><span className="font-bold">Best value: {comparison.recommended}</span></p>
                 <p className="text-xs text-brand-dark mt-1">{comparison.recommendation_reason}</p>
+                {(comparison.feasibility_notes || []).length > 0 && (
+                  <div className="mt-2 space-y-0.5">
+                    {comparison.feasibility_notes.map((f, i) => (
+                      <p key={i} className="text-[11px]">
+                        <span className="font-semibold">{f.concept}:</span>{" "}
+                        <span style={{ color: f.verdict === "Deliverable" ? "#3D7A5C" : f.verdict === "Not deliverable within budget" ? "#B84C3D" : "#B8863B" }}>{f.verdict}</span>
+                        {" - "}{f.reason}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-brand-text/70 mt-2 pt-2 border-t border-brand-border">
+                  {comparison.decision_note || "This is a cost-based recommendation only. The design decision remains yours - review it against the analysis findings and your own judgement before fixing a concept."}
+                </p>
               </div>
               {(comparison.cost_reduction_options || []).length > 0 && (
                 <div>

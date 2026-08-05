@@ -34,7 +34,7 @@ export function parseClaudeResponse(data) {
 }
 
 // ---------- Gemini ----------
-export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData }) {
+export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Gemini API key is missing. Please enter your API key in Settings.");
 
@@ -56,14 +56,33 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
   const payload = { contents: [{ role: "user", parts }] };
   if (maxTokens) payload.generationConfig = { maxOutputTokens: maxTokens };
   if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+  // Grounding with Google Search - gives Gemini live web access, so research-driven
+  // tools work on a Gemini key rather than being Claude-only.
+  if (useWebSearch) payload.tools = [{ google_search: {} }];
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": cleanKey },
-    body: JSON.stringify(payload),
-  });
+  async function send(body) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": cleanKey },
+      body: JSON.stringify(body),
+    });
+    return { r, data: await r.json().catch(() => ({})) };
+  }
 
-  const data = await response.json().catch(() => ({}));
+  let { r: response, data } = await send(payload);
+
+  // Not every model or key supports grounding. Fall back rather than failing the whole run.
+  if (!response.ok && useWebSearch) {
+    const msg = (data?.error?.message || "").toLowerCase();
+    if (msg.includes("tool") || msg.includes("google_search") || msg.includes("not supported") || response.status === 400) {
+      const { tools, ...noTools } = payload;
+      ({ r: response, data } = await send(noTools));
+      if (response.ok && typeof onSources === "function") {
+        onSources({ grounded: false, note: "This model or key does not support Google Search grounding, so the answer comes from the model's training knowledge rather than live sources.", sources: [] });
+      }
+    }
+  }
+
   if (!response.ok) {
     const errMsg = data?.error?.message || `Gemini API Error (${response.status})`;
     if (response.status === 400 && errMsg.toLowerCase().includes("key")) {
@@ -71,13 +90,25 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
     }
     throw new Error(errMsg);
   }
+
+  // Surface the real sources Google actually used, so reports can cite them.
+  if (useWebSearch && typeof onSources === "function") {
+    const gm = data?.candidates?.[0]?.groundingMetadata;
+    if (gm) {
+      const sources = (gm.groundingChunks || [])
+        .map((c) => ({ t: c?.web?.title || "", u: c?.web?.uri || "", o: "via Google Search" }))
+        .filter((x) => x.u);
+      onSources({ grounded: sources.length > 0, queries: gm.webSearchQueries || [], sources });
+    }
+  }
+
   const text = parseGeminiResponse(data);
   if (!text) throw new Error("Gemini returned an empty response. Try again.");
   return text;
 }
 
 // ---------- Claude ----------
-export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64 }) {
+export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Claude API key is missing. Please enter your API key in Settings.");
 
@@ -121,6 +152,15 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   if (!response.ok) {
     throw new Error(data?.error?.message || `Claude API Error (${response.status})`);
   }
+  if (useWebSearch && typeof onSources === "function") {
+    const sources = [];
+    (data.content || []).forEach((b) => {
+      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+        b.content.forEach((r) => { if (r?.url) sources.push({ t: r.title || "", u: r.url, o: "via web search" }); });
+      }
+    });
+    onSources({ grounded: sources.length > 0, sources });
+  }
   const text = parseClaudeResponse(data);
   if (!text) throw new Error("The AI returned no analyzable text (it may have only performed search steps). Try again.");
   return text;
@@ -152,11 +192,12 @@ export async function callAI(opts = {}) {
   const imageData = opts.imageData || opts.image || opts.fileData || null;
   const useWebSearch = opts.useWebSearch || false;
   const pdfBase64 = opts.pdfBase64 || null;
+  const onSources = opts.onSources || null;
 
   if (provider.includes("claude") || provider.includes("anthropic")) {
-    return await callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64 });
+    return await callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources });
   }
-  return await callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData });
+  return await callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources });
 }
 
 export default callAI;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FileText, ChevronDown, ChevronRight, RefreshCw, Info } from "lucide-react";
 
 /**
@@ -6,14 +6,30 @@ import { FileText, ChevronDown, ChevronRight, RefreshCw, Info } from "lucide-rea
  * Lets the user read exactly what will be exported, and regenerate insight first.
  */
 export default function ReportPreview({ reportText, chartsHtml, docRef, onRegenerate, regenerating, includeOverflow, setIncludeOverflow }) {
+  // "has content" = the report carries generated findings, not just the static scaffold
+  const hasContent =
+    !!reportText &&
+    !reportText.includes("(no findings generated") &&
+    !reportText.includes("(not generated)");
   const [open, setOpen] = useState(false);
+  const [touched, setTouched] = useState(false);
+
+  // Open automatically the first time a report actually has content, so the user
+  // sees what will be exported instead of having to discover a collapsed panel.
+  useEffect(() => {
+    if (!touched && hasContent) setOpen(true);
+  }, [hasContent, touched]);
+
   if (!reportText) return null;
 
   return (
     <div className="card">
-      <button onClick={() => setOpen((o) => !o)} className="card-header w-full flex items-center justify-between text-left">
+      <button onClick={() => { setOpen((o) => !o); setTouched(true); }} className="card-header w-full flex items-center justify-between text-left">
         <span className="flex items-center gap-2">
-          <FileText size={15} /> Report Preview {docRef ? `- ${docRef}` : ""}
+          <FileText size={15} /> Generated Report {docRef ? `- ${docRef}` : ""}
+          {hasContent && !open && (
+            <span className="text-[10px] font-normal normal-case text-brand-success ml-1">ready</span>
+          )}
         </span>
         <span className="flex items-center gap-2 text-xs font-normal text-brand-text">
           {open ? "Hide" : "Show"} {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}

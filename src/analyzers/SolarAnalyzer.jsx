@@ -5,6 +5,7 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML, sunPathCompassSVG } from "../utils/reportTemplate";
@@ -106,7 +107,8 @@ export default function SolarAnalyzer() {
     setSiteLoading(true); setSiteError(""); setSiteInfo(null);
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 900, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 900, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `Find the approximate latitude, longitude, and UTC timezone offset (as a number, e.g. 4 for UTC+4) for this location: "${location}". Respond with ONLY valid JSON, no markdown fences: {"lat": 0, "lon": 0, "utc_offset": 0, "resolved_name": "", "source": "how you determined this"}`,
       });
       const parsed = extractJSON(text);
@@ -136,7 +138,8 @@ export default function SolarAnalyzer() {
     setAutoLoading(true);
     try {
       const text = await callAI({
-        provider, apiKey, maxTokens: 1600, useWebSearch: provider === "claude",
+        provider, apiKey, maxTokens: 1600, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
           `For a public park / open space at "${site?.resolved_name || location}" (lat ${site?.lat}, lon ${site?.lon}), propose the typical functional zones such a space would contain, and for each, which compass directions are LIKELY already shaded by surrounding built form, existing tree canopy or topography. ` +
           "Base the shading on what is actually around that location - adjacent buildings, streets, mature planting - not on assumption. If you cannot tell, return an empty shaded array for that zone rather than guessing. " +
@@ -255,7 +258,7 @@ export default function SolarAnalyzer() {
           "\"thermal_comfort_note\":\"derived commentary - which hours are usable, which are not, and why\"," +
           "\"zone_recommendations\":[{\"zone\":\"\",\"recommendation\":\"cite the actual exposure hours and the directions needing cover\"}]," +
           "\"conclusion\":\"2-3 sentences naming the single highest-priority shade intervention\"}" +
-          "\n\nCOMPUTED DATA:\n" + JSON.stringify(summary, null, 2),
+          checklistPrompt("SOL") + "\n\nCOMPUTED DATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
@@ -280,6 +283,8 @@ export default function SolarAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [webSources, setWebSources] = useState([]);
+  const [groundingNote, setGroundingNote] = useState("");
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -321,7 +326,7 @@ export default function SolarAnalyzer() {
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
       runLimitations: [],
-      extraRefs: [],
+      extraRefs: webSources,
       overflow: overflowText,
     };
   }
@@ -431,6 +436,13 @@ export default function SolarAnalyzer() {
           {insight?.conclusion && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2><p className="text-sm text-[#3A362C] leading-relaxed font-medium">{insight.conclusion}</p></div>)}
 
           <div className="card">
+            <ReportPreview
+              reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+              chartsHtml={structuredOpts().chartsHtml}
+              includeOverflow={includeOverflow}
+              setIncludeOverflow={setIncludeOverflow}
+            />
+
             <div className="p-4">
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h2>
               <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />

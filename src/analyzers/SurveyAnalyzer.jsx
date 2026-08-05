@@ -6,6 +6,7 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG } from "../utils/reportTemplate";
@@ -170,7 +171,7 @@ export default function SurveyAnalyzer() {
           "\"red_flags\":[\"data quality issues that limit interpretation\"]," +
           "\"overall_summary\":\"4-6 sentences of real analysis - what the responses collectively reveal about how this place fails its users today\"," +
           "\"conclusion\":\"the single clearest design action and why the evidence supports it\"}. " +
-          "CRITICAL RULES: themes MUST be design themes, never groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data.\n\nSURVEY RESPONSES:\n" + raw,
+          "CRITICAL RULES: themes MUST be design themes, never groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw,
       });
       setAnalysis(extractJSON(text));
     } catch (e) {
@@ -406,9 +407,16 @@ export default function SurveyAnalyzer() {
           </div>
 
           <div className="card">
+            <ReportPreview
+              reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+              chartsHtml={structuredOpts().chartsHtml}
+              includeOverflow={includeOverflow}
+              setIncludeOverflow={setIncludeOverflow}
+            />
+
             <div className="p-4">
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h2>
-              <ExportButtons onExcel={() => {}} onWord={exportWord} onPDF={exportPDF} />
+              <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />
               <p className="text-[10px] text-brand-text/60 mt-2">Word includes all data as tables (opens natively in Microsoft Word). PDF includes visual charts — your browser's print dialog opens; choose "Save as PDF."</p>
             </div>
           </div>

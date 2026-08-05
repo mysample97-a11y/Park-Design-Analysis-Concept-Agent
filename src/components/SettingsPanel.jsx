@@ -184,8 +184,7 @@ export default function SettingsPanel({ keys, models, meta, saveKey, saveModel, 
           <Info size={16} className="text-brand-warning shrink-0 mt-0.5" />
           <p className="text-xs text-brand-text">
             This app currently supports <strong>Claude</strong> and <strong>Gemini</strong>. Other AI
-            providers aren't compatible with how this app runs, so only these two are offered. Both have
-            free-tier options that work here.
+            providers aren't compatible with how this app runs, so only these two are offered. Both have free-tier options that work here, and both can research the web live - Claude via its search tool, Gemini via Google Search grounding.
           </p>
         </div>
 

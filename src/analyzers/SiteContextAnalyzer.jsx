@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import { checklistPrompt } from "../utils/methodology";
 import { friendlyError , fileToBase64Raw } from "../utils/helpers";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -101,8 +102,9 @@ export default function SiteContextAnalyzer() {
     setContextLoading(true); setContextError("");
     try {
       const resText = await callAI({
-        provider, apiKey, maxTokens: 4000, useWebSearch: provider === "claude",
-        content: SITE_PROMPT +
+        provider, apiKey, maxTokens: 4000, useWebSearch: true,
+        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
+        content: SITE_PROMPT + checklistPrompt("SCX") +
           "\n\nLOCATION: " + (location || "(not stated)") +
           "\nDESCRIPTION: " + (siteDescription || "(none)") +
           (imageNotes ? "\n\nIMAGE INTERPRETATION:\n" + imageNotes : ""),
@@ -207,6 +209,8 @@ export default function SiteContextAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+  const [webSources, setWebSources] = useState([]);
+  const [groundingNote, setGroundingNote] = useState("");
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -242,7 +246,7 @@ export default function SiteContextAnalyzer() {
       interpretation: insight?.conclusion || "",
       conclusions: [...(insight?.key_findings || []), ...(insight?.constraints || [])].filter(Boolean),
       runLimitations: [],
-      extraRefs: [],
+      extraRefs: webSources,
       overflow: overflowText,
     };
   }
@@ -428,6 +432,19 @@ export default function SiteContextAnalyzer() {
         </div>
 
         {insight?.conclusion && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2><p className="text-sm text-[#3A362C] leading-relaxed font-medium">{insight.conclusion}</p></div>)}
+
+        <ReportPreview
+
+          reportText={buildStructuredReport({ ...structuredOpts(), docRef: "preview" })}
+
+          chartsHtml={structuredOpts().chartsHtml}
+
+          includeOverflow={includeOverflow}
+
+          setIncludeOverflow={setIncludeOverflow}
+
+        />
+
 
         <div className="bg-[#FFFFFF] rounded-lg border-2 border-[#E8E2D5] p-4">
           <h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445] mb-3">Export Report</h2>
