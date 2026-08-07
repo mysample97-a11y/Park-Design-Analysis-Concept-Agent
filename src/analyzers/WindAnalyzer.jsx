@@ -76,7 +76,10 @@ export default function WindAnalyzer() {
   function updateZone(id, patch) { setZones(zones.map((z) => (z.id === id ? { ...z, ...patch } : z))); }
   function removeZone(id) { setZones(zones.filter((z) => z.id !== id)); }
 
-  // City of Ottawa Wind Analysis Terms of Reference - pedestrian comfort thresholds (km/h)
+  // Pedestrian wind comfort thresholds (km/h). These are the widely-used international
+  // family (Lawson/Davenport-type, also reflected in NEN 8100 and many municipal terms of
+  // reference). Used as a fallback when no criteria specific to the project location are
+  // established; where local criteria exist the AI is asked to name and apply those instead.
   const COMFORT = [
     { key: "sitting", label: "Sitting", max: 10 },
     { key: "standing", label: "Standing", max: 14 },
@@ -169,7 +172,7 @@ export default function WindAnalyzer() {
         { title: "Seasonal wind reference", note: researchNote || "Built-in reference data - research the location to replace it.",
           headers: ["Season", "Prevailing", "Speed", "Dust risk", "Character"],
           rows: SEASONS.map((sn) => [sn.label, sn.prevailing, sn.speedRange, sn.dustRisk, sn.character]) },
-        { title: "Pedestrian wind comfort assessment", note: "Assessed against City of Ottawa Wind Analysis Terms of Reference criteria.",
+        { title: "Pedestrian wind comfort assessment", note: (insight?.governing_criteria || "Assessed against widely-used pedestrian comfort thresholds (Lawson/Davenport-type). Where the project location publishes its own criteria, those govern instead."),
           headers: ["Season", "Speed", "Sitting <=10", "Standing <=14", "Strolling <=17", "Walking <=20", "Safety >=90"],
           rows: comfortRows() },
         { title: "Comfort criteria applied", items: [
@@ -180,6 +183,17 @@ export default function WindAnalyzer() {
           "Uncomfortable for most activities: 20 km/h and above - mitigation recommended",
           "Safety hazard: 90 km/h and above - mitigation required",
         ] },
+        ...(insight?.extreme_events?.length ? [{
+          title: "Extreme wind events and design response",
+          note: "A design prompt, not a structural wind-loading assessment. Any structure must be designed to the wind loading code applying at this location by a qualified engineer.",
+          headers: ["Event", "Likelihood", "Design response"],
+          rows: insight.extreme_events.map((e) => [e.event, e.likelihood, e.design_response]),
+        }] : []),
+        ...(insight?.contextual_effects?.length ? [{
+          title: "Contextual wind effects",
+          headers: ["Factor", "Applies here", "Implication"],
+          rows: insight.contextual_effects.map((c) => [c.factor, c.applies ? "Yes" : "No", c.implication]),
+        }] : []),
         { title: "Site design mitigation options", items: [
           "Coniferous tree planting at exposed corners",
           "Landscape berms across the prevailing vector",

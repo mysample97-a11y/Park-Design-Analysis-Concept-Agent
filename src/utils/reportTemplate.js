@@ -114,7 +114,7 @@ export const TOOL_SPECS = {
       "computational fluid dynamics, turbulence modelling, pressure loads on structures, and pollutant dispersion.",
     deterministic: [
       "Per-zone exposure logic comparing zone orientation and declared existing shelter against stated prevailing directions",
-      "Assessment of stated peak wind speeds against published pedestrian comfort thresholds (sitting, standing, strolling, walking) and the wind safety limit",
+      "Assessment of stated peak wind speeds against pedestrian comfort thresholds for sitting, standing, strolling and walking, plus the wind safety limit. Where the project location publishes its own criteria those are applied and named; otherwise the widely-used Lawson/Davenport-type thresholds are used as a stated fallback",
     ],
     inferential: [
       "Retrieval and interpretation of prevailing and seasonal wind characteristics for the supplied location",
@@ -123,12 +123,14 @@ export const TOOL_SPECS = {
     limitations: [
       "Wind characterisation is drawn from general published climate information for the location, not from site-specific meteorological station data. It should be corroborated before design freeze.",
       "No airflow simulation is performed. Professional practice for a full pedestrian-level wind study uses either wind tunnel testing or computational fluid dynamics against a 3D model of the proposed massing and its surroundings; neither is performed here.",
-      "The wind rose is schematic - built from stated prevailing directions and peak speeds, not from hourly meteorological station records. A defensible study uses a long record (the City of Ottawa terms of reference require a minimum of 30 years of hourly data from a named station).",
+      "The wind rose is schematic - built from stated prevailing directions and peak speeds, not from hourly meteorological station records. A defensible study uses a long record; published terms of reference commonly require a minimum of 30 years of hourly data from a named station.",
+      "Extreme-event commentary is a design prompt, not a structural wind-loading assessment. Structures must be designed to the wind loading code applying at the location by a qualified engineer.",
       "Comfort thresholds are applied to a stated seasonal peak, not to a measured exceedance distribution. Published criteria are defined on an exceedance basis (typically the speed exceeded no more than 20 per cent of the time).",
       "Local obstructions - adjacent buildings, existing planting - are accounted for only insofar as the user declares them.",
     ],
     refs: [
-      { t: "Wind Analysis - Terms of Reference (pedestrian comfort and safety criteria)", o: "City of Ottawa", y: "", u: "" },
+      { t: "Pedestrian wind comfort criteria (Lawson/Davenport-type family, reflected in NEN 8100 and numerous municipal terms of reference)", o: "International practice", y: "", u: "" },
+      { t: "Wind Analysis - Terms of Reference (a clearly published implementation of these criteria, used here as the reference case)", o: "City of Ottawa", y: "", u: "" },
     ],
     convention:
       "Wind reporting should distinguish prevailing direction from seasonal variation, state whether the data source is site-specific or regional, and assess results against published pedestrian comfort criteria rather than describing conditions qualitatively.",
@@ -141,7 +143,7 @@ export const TOOL_SPECS = {
     inputs: "A project location, plus a description or photograph of existing vegetation. Optionally research the location to replace the built-in planting palette.",
     name: "Vegetation, Terrain and Soil Analysis",
     covers:
-      "assessment of existing vegetation as described or photographed, and a proposed planting palette appropriate to the project's climate and water context.",
+      "assessment of existing vegetation as described or photographed - including a retain, relocate or remove position for each with its reason - and a proposed planting palette appropriate to the project's climate and water context. Both the existing and the proposed are reported; a palette without an assessment of what is already there is an incomplete analysis.",
     excludes:
       "arboricultural condition survey, soil laboratory testing, geotechnical investigation, and irrigation hydraulic design.",
     deterministic: [

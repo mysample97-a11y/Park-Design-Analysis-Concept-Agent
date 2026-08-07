@@ -162,7 +162,17 @@ export default function VegetationAnalyzer() {
       toolCode: "VEG",
       meta,
       inputRecord: [{label:"Location",value:(typeof location!=="undefined"&&location)||"(not stated)"}],
-      findings: [{ title: "Analysis output", text: buildReportText() }],
+      findings: [
+        ...(insight?.existing_vegetation?.length ? [{
+          title: "Existing vegetation on site",
+          note: "Identification from description or photographs is indicative and requires confirmation by a qualified arborist.",
+          headers: ["Species", "Approx. count", "Condition", "Position", "Verdict", "Reason"],
+          rows: insight.existing_vegetation.map((e) => [e.species, e.approx_count, e.condition, e.position, e.verdict, e.reason]),
+        }] : []),
+        ...(insight?.existing_value ? [{
+          title: "Value of existing planting",
+          text: insight.existing_value,
+        }] : []),{ title: "Analysis output", text: buildReportText() }],
       chartNote: "Reference planting palette is reproduced in the PDF export.",
       chartsHtml: (PLANT_PALETTE.length ? tableHTML(["Species", "Type", "Water", "Shade", "Origin"],
           PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin]), "Reference planting palette") : ""),

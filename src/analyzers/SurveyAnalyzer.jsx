@@ -164,14 +164,14 @@ export default function SurveyAnalyzer() {
         provider, apiKey, maxTokens: 3500,
         content: "You are a community engagement analyst. Analyse the survey responses below and produce a genuinely useful synthesis - not a restatement of the data. " +
           "Return ONLY valid JSON, no markdown fences: {" +
-          "\"themes\":[{\"theme\":\"a meaningful DESIGN theme (shade, accessibility, safety, ecology, play...), never a respondent grouping\",\"count\":0,\"representative_quote\":\"a short verbatim phrase from an actual response\",\"design_response\":\"the specific spatial intervention this calls for\"}]," +
+          "\"themes\":[{\"theme\":\"a theme DERIVED FROM WHAT RESPONDENTS ACTUALLY SAID - do not force responses into an expected set; if they raised something unusual or site-specific, report that\",\"actionable_by\":\"design|management|outside project control\",\"count\":0,\"representative_quote\":\"a short verbatim phrase from an actual response\",\"design_response\":\"the specific spatial intervention this calls for\"}]," +
           "\"priority_ranking\":[{\"priority\":\"\",\"mentions\":0,\"why_it_matters\":\"\"}]," +
           "\"demographic_patterns\":[{\"group\":\"e.g. older residents, parents, students\",\"distinct_need\":\"what this group asks for that others do not\"}]," +
           "\"conflicts\":[{\"tension\":\"where user groups want incompatible things\",\"resolution\":\"how the design can serve both\"}]," +
           "\"red_flags\":[\"data quality issues that limit interpretation\"]," +
           "\"overall_summary\":\"4-6 sentences of real analysis - what the responses collectively reveal about how this place fails its users today\"," +
           "\"conclusion\":\"the single clearest design action and why the evidence supports it\"}. " +
-          "CRITICAL RULES: themes MUST be design themes, never groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw,
+          "CRITICAL RULES: derive themes from the responses themselves. Do NOT default to shade, accessibility and safety unless the data actually shows them. Report anything unusual or site-specific that respondents raised, and say whether each theme is actionable by design, by management, or outside the project's control. Never use groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw,
       });
       setAnalysis(extractJSON(text));
     } catch (e) {

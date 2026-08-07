@@ -132,6 +132,67 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         )}
       </div>
       <div className="p-4 space-y-4">
+        {/* How this tool can be used - four evaluated routes */}
+        <div className="border border-brand-border rounded-lg p-3 space-y-2">
+          <p className="text-xs font-semibold text-brand-text uppercase tracking-wide">How you can run this tool</p>
+          <p className="text-[10px] text-brand-text/70">
+            Four approaches were built and tested. Each is a real option - pick the one that matches your budget
+            and how much the research needs to be traceable.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr className="text-left text-brand-text/60 border-b border-brand-border">
+                  <th className="py-1.5 pr-2">Route</th><th className="py-1.5 pr-2">Cost</th>
+                  <th className="py-1.5 pr-2">Live sources</th><th className="py-1.5">Status</th>
+                </tr>
+              </thead>
+              <tbody className="text-brand-dark">
+                <tr className="border-b border-brand-border/50">
+                  <td className="py-1.5 pr-2"><strong>Gemini free key</strong><span className="block text-brand-text/60">Reference-backed, no live search</span></td>
+                  <td className="py-1.5 pr-2">Free</td>
+                  <td className="py-1.5 pr-2 text-brand-warning">No</td>
+                  <td className="py-1.5 text-brand-success">Available</td>
+                </tr>
+                <tr className="border-b border-brand-border/50">
+                  <td className="py-1.5 pr-2"><strong>Claude API key</strong><span className="block text-brand-text/60">Web search included</span></td>
+                  <td className="py-1.5 pr-2">Paid credit</td>
+                  <td className="py-1.5 pr-2 text-brand-success">Yes</td>
+                  <td className="py-1.5 text-brand-success">Available</td>
+                </tr>
+                <tr className="border-b border-brand-border/50">
+                  <td className="py-1.5 pr-2"><strong>Gemini + grounding</strong><span className="block text-brand-text/60">Google Search grounding</span></td>
+                  <td className="py-1.5 pr-2">Paid tier</td>
+                  <td className="py-1.5 pr-2 text-brand-success">Yes</td>
+                  <td className="py-1.5 text-brand-success">Available</td>
+                </tr>
+                <tr className="border-b border-brand-border/50">
+                  <td className="py-1.5 pr-2"><strong>Claude artifact</strong><span className="block text-brand-text/60">Single tool, inside Claude</span></td>
+                  <td className="py-1.5 pr-2">Free</td>
+                  <td className="py-1.5 pr-2 text-brand-success">Yes</td>
+                  <td className="py-1.5 text-brand-text/70">Demo only - not shareable as a URL</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-2"><strong>Retrieval API (Tavily)</strong><span className="block text-brand-text/60">Dedicated search service</span></td>
+                  <td className="py-1.5 pr-2">Free tier</td>
+                  <td className="py-1.5 pr-2 text-brand-success">Yes</td>
+                  <td className="py-1.5 text-brand-danger">Blocked - needs a server</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-brand-text/70">
+            <strong>Trying it out?</strong> A free Gemini key is enough. The analysis, computation and reports all
+            work - research draws on the model's knowledge and the built-in reference standards rather than live
+            pages, and the report says so.
+          </p>
+          <p className="text-[10px] text-brand-text/60">
+            Tavily was built and tested but is blocked by browser security (CORS) - it needs a server-side proxy,
+            which is a documented next step rather than a failure. This app deliberately has no backend, so your
+            key never leaves your browser and nothing is stored anywhere.
+          </p>
+        </div>
+
         {/* Gemini web search - off by default, and the reason is stated plainly */}
         <div className="border border-brand-border rounded-lg p-3 space-y-2">
           <label className="flex items-start gap-2 cursor-pointer">

@@ -1,5 +1,6 @@
-import { useState, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
+import Landing from "./components/Landing";
 import SettingsPanel, { useApiKeys } from "./components/SettingsPanel";
 import SolarAnalyzer from "./analyzers/SolarAnalyzer";
 import SurveyAnalyzer from "./analyzers/SurveyAnalyzer";
@@ -32,6 +33,47 @@ export function useAppContext() {
 export default function App() {
   const [activeTab, setActiveTab] = useState("site");
   const [showSettings, setShowSettings] = useState(false);
+  const [view, setView] = useState("landing");   // "landing" | "app"
+  const [dirty, setDirty] = useState(false);      // true once the user has done work worth losing
+
+  // Entering the workspace pushes a history entry so the browser Back button returns
+  // to the landing page rather than leaving the site. If work has been done, warn first.
+  function openTool(tabId) {
+    setActiveTab(tabId);
+    setView("app");
+    try { window.history.pushState({ view: "app" }, ""); } catch { /* ignore */ }
+    window.scrollTo(0, 0);
+  }
+
+  useEffect(() => {
+    function onPop() {
+      if (view !== "app") return;
+      if (dirty) {
+        const leave = window.confirm(
+          "Return to the landing page?\n\nAnything you have entered or generated in the workspace will be lost. " +
+          "Export any report you want to keep before leaving."
+        );
+        if (!leave) {
+          try { window.history.pushState({ view: "app" }, ""); } catch { /* ignore */ }
+          return;
+        }
+      }
+      setView("landing");
+      window.scrollTo(0, 0);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [view, dirty]);
+
+  // Guard a full page reload / tab close while there is unsaved work
+  useEffect(() => {
+    function beforeUnload(e) {
+      if (view === "app" && dirty) { e.preventDefault(); e.returnValue = ""; }
+    }
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [view, dirty]);
+
   const { keys, models, meta, grounding, loaded, saveKey, saveModel, saveMeta, saveGrounding, clearAll, getActiveKey, getActiveModel } = useApiKeys();
 
   const [provider, setProvider] = useState("claude");
@@ -52,9 +94,34 @@ export default function App() {
     saveMeta,
     saveGrounding,
     clearAll,
+    markDirty: () => setDirty(true),
   };
 
   const hasKey = !!apiKey;
+
+  // Landing page first. The workspace mounts only when an instrument is chosen,
+  // so the landing animation never runs alongside it.
+  if (view === "landing") {
+    return (
+      <AppContext.Provider value={ctxValue}>
+        <Landing onOpen={openTool} onSettings={() => { setView("app"); setShowSettings(true); try { window.history.pushState({ view: "app" }, ""); } catch { /* ignore */ } }} />
+        {showSettings && (
+          <SettingsPanel
+            keys={keys}
+            models={models}
+            meta={meta}
+            grounding={grounding}
+            saveKey={saveKey}
+            saveModel={saveModel}
+            saveMeta={saveMeta}
+            saveGrounding={saveGrounding}
+            clearAll={clearAll}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
+      </AppContext.Provider>
+    );
+  }
 
   return (
     <AppContext.Provider value={ctxValue}>
@@ -77,6 +144,17 @@ export default function App() {
               className="text-xs font-medium px-3 py-2 rounded-md flex items-center gap-1 shrink-0 bg-white/10 text-white hover:bg-white/20 transition"
             >
               <Settings size={13} /> {showSettings ? "Hide" : "Settings"}
+            </button>
+            <button
+              onClick={() => {
+                if (!dirty || window.confirm("Return to the landing page?\n\nAnything you have entered or generated here will be lost. Export any report you want to keep first.")) {
+                  setView("landing"); window.scrollTo(0, 0);
+                }
+              }}
+              className="text-xs font-medium border border-brand-border px-3 py-1.5 rounded-md flex items-center gap-1 hover:border-brand-gold"
+              title="Back to the landing page"
+            >
+              Home
             </button>
           </div>
         </header>

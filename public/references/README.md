@@ -1,26 +1,27 @@
 # Reference library
 
-These are the published documents the tools' **methodology coverage checklists** were
-distilled from. They are stored here for **provenance** — so any figure or expectation
-the app relies on can be traced to a real, retrievable source.
+Published standards and guidance underpinning the tools' **methodology coverage checklists**,
+organised by tool. Each folder has a `README.md` listing what governs that tool, what is
+present, and where to obtain what is missing.
 
-**They are not read by the application at runtime.** They run to megabytes; sending them
-to a language model is not viable within any practical prompt budget. Instead each has
-been distilled into a coverage checklist in `src/utils/methodology.js`, which tells the
-analysis *what a competent study must cover* — never a value, threshold or formula.
+**They are not read by the application at runtime.** They run to megabytes — far beyond any
+practical prompt budget. Each has been distilled into a coverage checklist in
+`src/utils/methodology.js`, which tells the analysis *what a competent study must cover*
+— never a value, threshold or formula.
 
-That distinction is deliberate. The checklist supplies **scope**; the AI establishes the
-**content** that actually governs at the user's location. A site in Toronto is therefore
-checked for flood risk (universally expected) but reports Ontario sources.
+That distinction is what keeps the tools location-generic. The checklist supplies **scope**;
+the AI establishes the **content** that actually governs at the user's location.
 
-| File | Source | Informs |
-|---|---|---|
-| ARCON-Site-Analysis-Checklist.txt | Architects Registration Council of Nigeria | Site Context coverage: hazards, adjacencies, ground conditions |
-| Delhi-UAC-Park-Design-Guidelines.pdf | Delhi Urban Art Commission | Shade coverage targets, play/vehicle separation, spatial organisation |
-| City-of-Ottawa-Wind-Analysis-ToR.pdf | City of Ottawa | Pedestrian wind comfort and safety criteria, wind rose method, mitigation |
+| Folder | Tool |
+|---|---|
+| `site-context/` | Site Context & Accessibility |
+| `solar/` | Solar Exposure |
+| `wind/` | Wind Exposure |
+| `vegetation/` | Vegetation, Terrain & Soil |
+| `survey/` | Community Survey |
+| `concept/` | Concept Generation |
+| `budget/` | Cost & Feasibility |
+| `cross-cutting/` | Applies to several tools |
 
-Additional sources cited in reports but not stored here (freely available online):
-
-- NOAA Global Monitoring Laboratory — General Solar Position Calculations
-- ASHRAE Handbook of Fundamentals — clear-sky irradiance model
-- RICS NRM 1 — Order of Cost Estimating and Cost Planning
+Some documents are copyrighted or paywalled and cannot be redistributed. Those are marked
+**CITED** — referenced in reports with full attribution, but not included here.
