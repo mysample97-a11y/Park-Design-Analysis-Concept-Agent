@@ -106,7 +106,15 @@ export function useApiKeys() {
   return { keys, models, meta, grounding, loaded, saveKey, saveModel, saveMeta, saveGrounding, clearAll, getActiveKey, getActiveModel };
 }
 
-export default function SettingsPanel({ keys, models, meta, grounding, saveKey, saveModel, saveMeta, saveGrounding, clearAll, onClose }) {
+export default function SettingsPanel({ keys, models, meta, grounding, saveKey, saveModel, saveMeta, saveGrounding, clearAll, onClose, focus }) {
+  // The landing page can open this panel straight to a section.
+  useEffect(() => {
+    if (!focus) return;
+    const id = focus === "help" ? "sp-help" : focus === "project" ? "sp-project" : "sp-keys";
+    const el = document.getElementById(id);
+    if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  }, [focus]);
+
   const [showClaude, setShowClaude] = useState(false);
   const [showGemini, setShowGemini] = useState(false);
   const [cleared, setCleared] = useState(false);
@@ -132,8 +140,8 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         )}
       </div>
       <div className="p-4 space-y-4">
-        {/* How this tool can be used - four evaluated routes */}
-        <div className="border border-brand-border rounded-lg p-3 space-y-2">
+        {/* 1 — HELP: how the tool can be run */}
+        <div id="sp-help" className="border border-brand-border rounded-lg p-3 space-y-2 scroll-mt-4">
           <p className="text-xs font-semibold text-brand-text uppercase tracking-wide">How you can run this tool</p>
           <p className="text-[10px] text-brand-text/70">
             Four approaches were built and tested. Each is a real option - pick the one that matches your budget
@@ -193,8 +201,10 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
           </p>
         </div>
 
-        {/* Gemini web search - off by default, and the reason is stated plainly */}
-        <div className="border border-brand-border rounded-lg p-3 space-y-2">
+        </div>
+
+        {/* 3 — NOTES & LIMITATIONS */}
+        <div id="sp-notes" className="border border-brand-border rounded-lg p-3 space-y-2 scroll-mt-4">
           <label className="flex items-start gap-2 cursor-pointer">
             <input type="checkbox" checked={!!grounding} onChange={(e) => saveGrounding(e.target.checked)} className="mt-0.5" />
             <span>
@@ -219,8 +229,8 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
           </p>
         </div>
 
-        {/* Project details - used in every report title block */}
-        <div className="border border-brand-border rounded-lg p-3 space-y-2">
+        {/* 4 — PROJECT DETAILS */}
+        <div id="sp-project" className="border border-brand-border rounded-lg p-3 space-y-2 scroll-mt-4">
           <p className="text-xs font-semibold text-brand-text uppercase tracking-wide">Project Details</p>
           <p className="text-[10px] text-brand-text/60">
             Used in the title block and document reference of every report this app exports.
@@ -286,6 +296,7 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* Claude Key */}
+        <div id="sp-keys" className="scroll-mt-4">
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-brand-text uppercase tracking-wide flex items-center gap-1">
             <KeyRound size={12} /> Claude API Key

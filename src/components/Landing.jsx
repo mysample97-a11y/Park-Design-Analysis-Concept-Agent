@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Settings } from "lucide-react";
+import { Settings, HelpCircle, FolderCog } from "lucide-react";
 import "../landing.css";
 
 /**
@@ -14,7 +14,7 @@ import "../landing.css";
  * Videos live in public/videos/ — portal.mp4, hologram.mp4, timelapse.mp4.
  * If they are absent the page still works; the panels simply render dark.
  */
-export default function Landing({ onOpen, onSettings }) {
+export default function Landing({ onOpen, onNav }) {
   useEffect(() => {
     const cleanups = [];
     try {
@@ -84,22 +84,32 @@ export default function Landing({ onOpen, onSettings }) {
           box.style.opacity = opacity;
           box.style.transform = `scale(${scale}) translateY(${dist * 0.05}px)`;
       });
-      const rafId = requestAnimationFrame(frame);
-    cleanups.push(() => cancelAnimationFrame(rafId));
+      rafId = requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+    let rafId = requestAnimationFrame(frame);
+    cleanups.push(() => cancelAnimationFrame(rafId));
     } catch (e) {
       // A landing-page animation must never take the app down.
       console.warn("Landing effects failed to initialise:", e);
     }
+    cleanups.push(() => document.body.classList.remove("nexus-active"));
     return () => cleanups.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
   }, []);
 
   return (
     <div className="landing-root">
-      <button className="lp-settings" onClick={onSettings} title="API keys and settings" aria-label="Settings">
-        <Settings size={17} />
-      </button>
+      {/* Control bar - only appears once the instrument ring is active */}
+      <div className="lp-controls">
+        <button className="lp-btn" onClick={() => onNav("project")} title="Project details">
+          <FolderCog size={14} /> Project details
+        </button>
+        <button className="lp-btn" onClick={() => onNav("help")} title="How you can run this tool">
+          <HelpCircle size={14} /> Help
+        </button>
+        <button className="lp-btn lp-btn-icon" onClick={() => onNav("settings")} title="API keys and settings" aria-label="Settings">
+          <Settings size={15} />
+        </button>
+      </div>
       <div id="load">Initialising instruments</div>
       <div id="bar"></div>
 

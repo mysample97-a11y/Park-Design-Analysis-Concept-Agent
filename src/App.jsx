@@ -1,5 +1,5 @@
 import { useState, useEffect, createContext, useContext } from "react";
-import { MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
+import { Home, MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
 import Landing from "./components/Landing";
 import SettingsPanel, { useApiKeys } from "./components/SettingsPanel";
 import SolarAnalyzer from "./analyzers/SolarAnalyzer";
@@ -33,6 +33,7 @@ export function useAppContext() {
 export default function App() {
   const [activeTab, setActiveTab] = useState("site");
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsFocus, setSettingsFocus] = useState("settings");
   const [view, setView] = useState("landing");   // "landing" | "app"
   const [dirty, setDirty] = useState(false);      // true once the user has done work worth losing
 
@@ -104,7 +105,13 @@ export default function App() {
   if (view === "landing") {
     return (
       <AppContext.Provider value={ctxValue}>
-        <Landing onOpen={openTool} onSettings={() => { setView("app"); setShowSettings(true); try { window.history.pushState({ view: "app" }, ""); } catch { /* ignore */ } }} />
+        <Landing onOpen={openTool} onNav={(target) => {
+          setView("app");
+          setShowSettings(true);
+          setSettingsFocus(target);        // "settings" | "help" | "project"
+          try { window.history.pushState({ view: "app" }, ""); } catch { /* ignore */ }
+          window.scrollTo(0, 0);
+        }} />
         {showSettings && (
           <SettingsPanel
             keys={keys}
@@ -116,6 +123,7 @@ export default function App() {
             saveMeta={saveMeta}
             saveGrounding={saveGrounding}
             clearAll={clearAll}
+            focus={settingsFocus}
             onClose={() => setShowSettings(false)}
           />
         )}
@@ -154,7 +162,7 @@ export default function App() {
               className="text-xs font-medium border border-brand-border px-3 py-1.5 rounded-md flex items-center gap-1 hover:border-brand-gold"
               title="Back to the landing page"
             >
-              Home
+              <Home size={13} /> Home
             </button>
           </div>
         </header>
@@ -171,6 +179,7 @@ export default function App() {
               saveMeta={saveMeta}
               saveGrounding={saveGrounding}
               clearAll={clearAll}
+              focus={settingsFocus}
               onClose={() => setShowSettings(false)}
             />
             <div className="mt-4 flex items-center gap-3">
