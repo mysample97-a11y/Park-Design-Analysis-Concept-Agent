@@ -59,7 +59,7 @@ export const TOOL_SPECS = {
     limitations: [
       "Sun position is geometric. Atmospheric refraction and urban heat island effects are not modelled.",
       "Insolation figures are CLEAR-SKY. No cloud cover, aerosol, dust or humidity attenuation is applied, so values are an upper bound. Real annual yield at a given site is typically lower and requires measured meteorological data (a TMY dataset) or a tool such as Autodesk Insight for a model-based cumulative study.",
-      "This is a site-level solar study, not a surface-by-surface insolation analysis of a 3D model. It does not compute shading cast by specific proposed built form.",
+      "This is a site-level solar study, not a surface-by-surface insolation analysis of a 3D model. It does not compute shading cast by specific proposed built form. Deriving shade geometry from an actual site boundary and surrounding built form requires a 3D mesh - typically from UAV photogrammetry or LiDAR - processed as in Jaczewska et al. (2025). That is the correct next-stage method and is beyond this tool.",
       "Existing shade is recorded as user-declared compass directions per zone, not as surveyed canopy or building geometry.",
       "Heat tier thresholds are a comparative convention for ranking exposure, not a temperature measurement.",
       "Resolved coordinates are AI-derived from a location description and should be confirmed against survey data.",
@@ -71,6 +71,7 @@ export const TOOL_SPECS = {
         u: "https://gml.noaa.gov/grad/solcalc/calcdetails.html" },
       { t: "Clear-sky irradiance model (A, B, C coefficient method)", o: "ASHRAE Handbook of Fundamentals", y: "", u: "" },
       { t: "Park Design Guidelines - shade coverage requirements", o: "Delhi Urban Art Commission", y: "", u: "" },
+      { t: "Assessment of the Solar Potential of Buildings Based on Photogrammetric Data (the established method for deriving shade and solar potential from site geometry - requires 3D mesh data this tool does not hold)", o: "Jaczewska, Sybilski & Tywonek, Energies 18(4):868", y: "2025", u: "https://www.mdpi.com/1996-1073/18/4/868" },
     ],
     convention:
       "Solar analysis should state the reference days used and the latitude applied, so results are reproducible by a third party.",
