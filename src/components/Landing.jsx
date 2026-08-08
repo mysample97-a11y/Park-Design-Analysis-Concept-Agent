@@ -18,7 +18,11 @@ export default function Landing({ onOpen, onNav }) {
   useEffect(() => {
     const cleanups = [];
     try {
-    setTimeout(() => document.getElementById("load").classList.add("gone"), 800);
+    setTimeout(() => { const l = $("load"); if (l) l.classList.add("gone"); }, 800);
+
+    // Defensive lookup: a missing node must never stop the animation loop.
+    const $ = (id) => document.getElementById(id);
+    const setTxt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
 
     let progress = 0;
     const nexusTitle = document.getElementById("nexus-title");
@@ -35,16 +39,18 @@ export default function Landing({ onOpen, onNav }) {
       "Concept Generator": "Distinct spatial concepts generated against the evidence - every zone tied to a specific finding, every facility scheduled for costing, each option scored against stated criteria. Selection stays with the designer.",
       "Cost & Feasibility": "An order-of-cost estimate built on the RICS NRM1 cascade and tested against your budget. Every rate carries its basis and a confidence band; anything without a published benchmark is flagged, not hidden."
     };
-    const defaultTitle = "THE INSTRUMENT SET";
+    const defaultTitle = "TOOL CHEST";
     const defaultDesc = "Eight analysis instruments that feed one another - site context into climate, climate into synthesis, synthesis into concept, concept into cost. Hover an instrument to see what it does. Click any one to open the workspace.";
 
     document.querySelectorAll('.tool-node').forEach(node => {
         node.addEventListener('mouseenter', () => {
             const name = node.getAttribute('data-name');
-            nexusTitle.innerText = name; nexusDesc.innerText = toolDescriptions[name];
+            if (nexusTitle) nexusTitle.innerText = name;
+            if (nexusDesc) nexusDesc.innerText = toolDescriptions[name] || "";
         });
         node.addEventListener('mouseleave', () => {
-            nexusTitle.innerText = defaultTitle; nexusDesc.innerText = defaultDesc;
+            if (nexusTitle) nexusTitle.innerText = defaultTitle;
+            if (nexusDesc) nexusDesc.innerText = defaultDesc;
         });
     });
 
@@ -54,29 +60,35 @@ export default function Landing({ onOpen, onNav }) {
     function onScroll() {
       const max = document.body.scrollHeight - innerHeight;
       progress = max > 0 ? clamp01(scrollY / max) : 0;
-      document.getElementById("bar").style.width = (progress * 100) + "%";
+      const barEl = $("bar"); if (barEl) barEl.style.width = (progress * 100) + "%";
   
       const i = Math.min(5, Math.floor(progress * 6.5));
-      document.getElementById("hP").textContent = String(i + 1).padStart(2, "0");
-      document.getElementById("hN").textContent = STAGES[i];
-      document.getElementById("hW").textContent = "Cycle " + String(Math.round(progress * 999)).padStart(3, "0"); 
-      document.getElementById("hPct").textContent = Math.round(progress * 100) + "%";
+      setTxt("hP", String(i + 1).padStart(2, "0"));
+      setTxt("hN", STAGES[i]);
+      setTxt("hW", "Cycle " + String(Math.round(progress * 999)).padStart(3, "0"));
+      setTxt("hPct", Math.round(progress * 100) + "%");
 
       if(progress > 0.85) {
           document.body.classList.add("nexus-active");
-          document.getElementById("clock").textContent = "NEXUS · INITIALIZED";
+          setTxt("clock", "NEXUS · INITIALISED");
       } else {
           document.body.classList.remove("nexus-active");
-          document.getElementById("clock").textContent = "CYCLE 0" + (i + 1) + " · ONLINE";
+          setTxt("clock", "CYCLE 0" + (i + 1) + " · ONLINE");
       }
     }
     window.addEventListener("scroll", onScroll, {passive: true});
     onScroll();
 
-    // Cinematic Block Fade & Scale Animation
-    function frame(){
-      const center = window.innerHeight / 2;
-      boxes.forEach(box => {
+    } catch (e) {
+      console.warn("Landing: HUD/interaction setup failed:", e);
+    }
+
+    // Block reveal runs in its own scope - it must survive any failure above.
+    try {
+      const boxes2 = document.querySelectorAll(".pane .box");
+      function frame(){
+        const center = window.innerHeight / 2;
+        boxes2.forEach(box => {
           const rect = box.parentElement.getBoundingClientRect();
           const dist = Math.abs(rect.top + rect.height / 2 - center);
           const opacity = Math.max(0, 1 - (dist / (window.innerHeight * 0.5)));
@@ -84,13 +96,12 @@ export default function Landing({ onOpen, onNav }) {
           box.style.opacity = opacity;
           box.style.transform = `scale(${scale}) translateY(${dist * 0.05}px)`;
       });
-      rafId = requestAnimationFrame(frame);
-    }
-    let rafId = requestAnimationFrame(frame);
-    cleanups.push(() => cancelAnimationFrame(rafId));
+        rafId = requestAnimationFrame(frame);
+      }
+      let rafId = requestAnimationFrame(frame);
+      cleanups.push(() => cancelAnimationFrame(rafId));
     } catch (e) {
-      // A landing-page animation must never take the app down.
-      console.warn("Landing effects failed to initialise:", e);
+      console.warn("Landing: block reveal failed:", e);
     }
     cleanups.push(() => document.body.classList.remove("nexus-active"));
     return () => cleanups.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
@@ -139,7 +150,7 @@ export default function Landing({ onOpen, onNav }) {
               </div>
               {/* Bridging Description Box */}
               <div id="nexus-details">
-                  <h3 id="nexus-title">THE INSTRUMENT SET</h3>
+                  <h3 id="nexus-title">TOOL CHEST</h3>
                   <p id="nexus-desc">Eight analysis instruments that feed one another - site context into climate, climate into synthesis, synthesis into concept, concept into cost. Hover an instrument to see what it does. Click any one to open the workspace.</p>
               </div>
           </div>
@@ -152,7 +163,7 @@ export default function Landing({ onOpen, onNav }) {
       {/* Static HUD Elements */}
       <div className="hud tl"><b>SITE ANALYSIS SUITE</b><br/>Eight instruments</div>
       <div className="hud tr">Stage <b id="hP">01</b>/06<br /><span id="hN">Urban Survey</span></div>
-      <div className="hud bl"><span id="hud-state">READY</span></div>
+      <div className="hud bl" id="clock">CYCLE 01 · ONLINE</div>
       <div className="hud br"><span className="o" id="hW">Cycle 000</span> · <span className="g" id="hPct">0%</span></div>
 
       {/* LAYER 3: Scrollable Blocks */}

@@ -133,7 +133,7 @@ export default function App() {
 
   return (
     <AppContext.Provider value={ctxValue}>
-      <div className="min-h-screen bg-brand-cream text-brand-dark font-sans">
+      <div className="min-h-screen bg-[#070C14] text-brand-dark font-sans">
         <header className="bg-brand-dark px-6 py-5">
           <div className="max-w-6xl mx-auto flex items-start justify-between gap-4">
             <div>
@@ -159,7 +159,7 @@ export default function App() {
                   setView("landing"); window.scrollTo(0, 0);
                 }
               }}
-              className="text-xs font-medium border border-brand-border px-3 py-1.5 rounded-md flex items-center gap-1 hover:border-brand-gold"
+              className="text-xs font-medium px-3 py-2 rounded-md flex items-center gap-1 shrink-0 bg-white/10 text-white hover:bg-white/20 transition"
               title="Back to the landing page"
             >
               <Home size={13} /> Home
@@ -168,7 +168,7 @@ export default function App() {
         </header>
 
         {showSettings && (
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-10 bg-brand-cream rounded-lg my-4 shadow-2xl">
             <SettingsPanel
               keys={keys}
               models={models}
@@ -211,7 +211,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-10 bg-brand-cream rounded-lg my-4 shadow-2xl">
           <div className="flex gap-2 border-b-2 border-brand-border pb-1 overflow-x-auto whitespace-nowrap">
             {TABS.map((tab) => {
               const Icon = tab.icon;

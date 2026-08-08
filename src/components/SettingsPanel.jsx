@@ -141,7 +141,7 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
       </div>
       <div className="p-4 space-y-4">
         {/* 1 — HELP: how the tool can be run */}
-        <div id="sp-help" className="border border-brand-border rounded-lg p-3 space-y-2 scroll-mt-4">
+        <div id="sp-help" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
           <p className="text-xs font-semibold text-brand-text uppercase tracking-wide">How you can run this tool</p>
           <p className="text-[10px] text-brand-text/70">
             Four approaches were built and tested. Each is a real option - pick the one that matches your budget
@@ -204,7 +204,7 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* 3 — NOTES & LIMITATIONS */}
-        <div id="sp-notes" className="border border-brand-border rounded-lg p-3 space-y-2 scroll-mt-4">
+        <div id="sp-notes" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
           <label className="flex items-start gap-2 cursor-pointer">
             <input type="checkbox" checked={!!grounding} onChange={(e) => saveGrounding(e.target.checked)} className="mt-0.5" />
             <span>
@@ -230,7 +230,7 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* 4 — PROJECT DETAILS */}
-        <div id="sp-project" className="border border-brand-border rounded-lg p-3 space-y-2 scroll-mt-4">
+        <div id="sp-project" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
           <p className="text-xs font-semibold text-brand-text uppercase tracking-wide">Project Details</p>
           <p className="text-[10px] text-brand-text/60">
             Used in the title block and document reference of every report this app exports.
@@ -296,7 +296,7 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* Claude Key */}
-        <div id="sp-keys" className="scroll-mt-4">
+        <div id="sp-keys" className="scroll-mt-4 space-y-4">
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-brand-text uppercase tracking-wide flex items-center gap-1">
             <KeyRound size={12} /> Claude API Key
