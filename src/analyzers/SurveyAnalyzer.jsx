@@ -9,7 +9,7 @@ import { callAI } from "../utils/ai";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG, missingFields, missingFieldsNote} from "../utils/reportTemplate";
 
 const COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B", "#8A6A3A", "#5A5445", "#7FBF9E", "#E08A6A"];
 
@@ -173,7 +173,12 @@ export default function SurveyAnalyzer() {
           "\"conclusion\":\"the single clearest design action and why the evidence supports it\"}. " +
           "CRITICAL RULES: derive themes from the responses themselves. Do NOT default to shade, accessibility and safety unless the data actually shows them. Report anything unusual or site-specific that respondents raised, and say whether each theme is actionable by design, by management, or outside the project's control. Never use groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw,
       });
-      setAnalysis(extractJSON(text));
+      const parsedAnalysis = extractJSON(text);
+      setAnalysis(parsedAnalysis);
+      // Field-contract guard: say so plainly when the model omits expected keys,
+      // rather than letting sections 8 and 10 print "(not generated)" silently.
+      const gaps = missingFields(parsedAnalysis, ["themes", "overall_summary", "conclusion"]);
+      setAnalysisError(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setAnalysisError(e.message || "Unknown error while generating insight.");
     } finally {

@@ -164,7 +164,34 @@ export default function ConceptGenerator() {
       toolCode: "CPT",
       meta,
       inputRecord: [{label:"Brief supplied",value:(brief||"(none)").slice(0,400)},{label:"Concepts requested",value:String(numConcepts)}],
-      findings: [{ title: "Analysis output", text: buildReportText() }],
+      // Section 6 built as separate findings per concept rather than one text blob,
+      // so each concept reads as its own subsection with a real zone table instead of
+      // every internal heading rendering at the same level.
+      findings: (() => {
+        const F = [];
+        const list = concepts || [];
+        if (list.length) F.push({
+          title: "Comparative scoring",
+          note: "Deterministic: overall is the arithmetic mean of the criterion scores. The criterion scores themselves are the model's structured judgment, not measurement - they order options for deliberation and are not evidence of quality.",
+          headers: ["Concept", ...SCORE_CRITERIA.map((sc) => sc.label), "Overall"],
+          rows: list.map((c) => [c.name || "-", ...SCORE_CRITERIA.map((sc) => c.scores?.[sc.id] ?? "-"), overallScore(c)]),
+        });
+        list.forEach((c, i) => {
+          F.push({
+            title: `Concept ${i + 1}: ${c.name || "(unnamed)"}`,
+            text: c.vision || "",
+            headers: ["Zone", "Position", "Area %", "Area m2", "Rationale"],
+            rows: (c.zones || []).map((z) => [
+              z.name || "-", z.position || "-", z.area_pct ?? "-",
+              siteAreaM2 && z.area_pct ? Math.round((Number(z.area_pct) || 0) / 100 * Number(siteAreaM2)).toLocaleString() : "-",
+              z.rationale || "-",
+            ]),
+          });
+          const fac = (c.zones || []).flatMap((z) => (z.facilities || []).map((x) => `${x} (${z.name})`));
+          if (fac.length) F.push({ title: `${c.name || `Concept ${i + 1}`} - facility schedule for cost estimating`, items: fac });
+        });
+        return F.length ? F : [{ title: "Analysis output", text: buildReportText() }];
+      })(),
       chartNote: (concepts && concepts.length)
         ? `${concepts.length} bubble diagram(s) and a concept comparison table are reproduced in the PDF export of this report.`
         : "No concepts generated, so no diagrams are included.",

@@ -49,3 +49,13 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* any wide element inside a card scrolls rather than pushing the page wide */
 .card .overflow-x-auto { max-width: 100%; }
 svg { max-width: 100%; height: auto; }
+
+/* ── Defensive: form controls state their own colour ──
+   landing.css declares body{color:var(--paper)} (#E8ECF2). CSS imported by a
+   component is still global, and an unlayered rule beats Tailwind's @layer base
+   text-brand-dark - so app inputs, which set a near-white background and no text
+   colour, rendered typed text invisible. landing.css is now scoped, but stating
+   the colour here means no future page-level stylesheet can reintroduce this.
+   Unlayered on purpose, so it wins the same way. */
+input, textarea, select { color: #1C2333; }
+.landing-root input, .landing-root textarea, .landing-root select { color: inherit; }

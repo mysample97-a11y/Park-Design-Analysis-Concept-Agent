@@ -223,7 +223,41 @@ export default function SiteContextAnalyzer() {
       toolCode: "SCX",
       meta,
       inputRecord: [{label:"Location",value:location||"(not stated)"},{label:"Description",value:(siteDescription||"(none)").slice(0,400)}],
-      findings: [{ title: "Analysis output", text: buildReportText() }],
+      // Section 6 is built as SEPARATE findings, each with its own heading and table.
+      // Previously the whole report was pushed in as one "Analysis output" text blob,
+      // so every internal heading rendered at the same level and the section read as
+      // one merged dump rather than structured subsections.
+      findings: (() => {
+        const F = [];
+        if ((context?.adjacencies || []).length) F.push({
+          title: "Adjacent land use",
+          headers: ["Edge", "Adjacent land use", "Implication"],
+          rows: context.adjacencies.map((a) => [a.direction || "-", a.use || "-", a.implication || "-"]),
+        });
+        if ((context?.accessibility_standards || []).length) F.push({
+          title: "Accessibility standards researched for this location",
+          note: "Each threshold is recorded with the standard it derives from, so the check is auditable.",
+          headers: ["Requirement", "Value", "Source"],
+          rows: context.accessibility_standards.map((x) => [x.label || "-", x.value || "-", x.source || "-"]),
+        });
+        const namedZones = zones.filter((z) => z.name.trim());
+        if (namedZones.length) F.push({
+          title: "Indicative visitor capacity by zone",
+          note: "Deterministic. Indicative planning bands, not modelled occupancy.",
+          headers: ["Zone", "Area (m2)", "Low", "High"],
+          rows: namedZones.map((z) => { const c = capacityRange(z.area); return [z.name, z.area || "-", c.low, c.high]; }),
+        });
+        const namedPaths = paths.filter((p) => p.name.trim());
+        if (namedPaths.length) F.push({
+          title: "Path and ramp accessibility check",
+          note: "Deterministic. Width compared against the threshold named in the standards table.",
+          headers: ["Element", "Type", "Width (m)", "Result"],
+          rows: namedPaths.map((p) => [p.name, p.type, p.width || "-", checkPath(p).label]),
+        });
+        if ((insight?.key_findings || []).length) F.push({ title: "Key findings", items: insight.key_findings });
+        if ((insight?.constraints || []).length) F.push({ title: "Constraints for the concept generator", items: insight.constraints });
+        return F.length ? F : [{ title: "Analysis output", text: buildReportText() }];
+      })(),
       chartNote: (zones.filter((z) => z.name.trim()).length || (insight?.adjacencies || []).length)
         ? "Adjacency map, zone capacity chart and accessibility check table are reproduced in the PDF export."
         : "No charts - add zones or run the analysis first.",

@@ -3,12 +3,12 @@
 :root{
   --void:#000000; --blue:#00E5FF; --pink:#FF2A6D; --green:#05D5FF; --paper:#E8ECF2; --dim:#5C6B7F;
 }
-*{box-sizing:border-box;margin:0;padding:0}
+.landing-root *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth; background:var(--void);}
-body{background:var(--void);color:var(--paper);overflow-x:hidden;
+body:has(.landing-root){background:var(--void);color:var(--paper);overflow-x:hidden;
  font-family:'Inter', sans-serif;-webkit-font-smoothing:antialiased;}
 
-h1, h2, h3, .hud, .ph, .spec, .tool-node::after, #nexus-title { font-family: 'Rajdhani', sans-serif; }
+.landing-root h1, .landing-root h2, .landing-root h3, .hud, .ph, .spec, .tool-node::after, #nexus-title { font-family: 'Rajdhani', sans-serif; }
 
 #bar{position:fixed;left:0;top:0;height:3px;width:0;z-index:40;
  background:linear-gradient(90deg,var(--blue),var(--pink) 55%,var(--green));box-shadow:0 0 16px var(--blue)}
@@ -105,19 +105,17 @@ body.nexus-active .flow { opacity: 0; pointer-events: none; }
 
 .ph{font-size:12px;letter-spacing:.34em; color:var(--blue);margin-bottom:14px;display:flex;align-items:center;gap:9px}
 .ph i{width:22px;height:1px;background:var(--blue)}
-/* Headings carry an EXPLICIT colour. They previously relied on inheriting
-   body{color:var(--paper)} from this file - but index.css also sets a body colour
-   (text-brand-dark, for the light app UI). Which one wins depends on cascade-layer
-   and bundle order, so on the deployed build the stage headings rendered dark on a
-   dark glass panel and became unreadable. Stating the colour here removes the
-   dependency entirely. Same reasoning for the body copy, lifted off the old #8595A8
-   which was too dim to read over the video. */
-.pane .box h1, .pane .box h2, .pane .box h3 { color: var(--paper); }
-h1{font-size:clamp(36px,4vw,55px);line-height:.98;letter-spacing:-.01em;font-weight:700;margin-bottom:15px; text-transform: uppercase; color:var(--paper);}
-h1 em{font-style:normal;display:block;background:linear-gradient(96deg,#fff,var(--blue) 58%,var(--pink)); -webkit-background-clip:text;background-clip:text;color:transparent}
-h2{font-size:clamp(24px,2.5vw,34px);line-height:1.09;letter-spacing:-.01em;font-weight:600;margin-bottom:11px; text-transform: uppercase; color:var(--paper);}
-h3{color:var(--paper);}
-p.l{font-size:clamp(13px,1vw,15px);line-height:1.75;color:#C3D2E2; font-weight: 400;}
+/* SCOPED TO .landing-root ON PURPOSE.
+   These rules were previously written as bare h1/h2/h3 selectors. This file is
+   imported by a component but CSS imports are global, so those rules applied to the
+   WHOLE app - including the tool pages, whose headings sit on a cream background.
+   Setting a near-white colour on a global h1 made every tool heading invisible.
+   Every visual rule below is now confined to the landing page. */
+.landing-root h1{font-size:clamp(36px,4vw,55px);line-height:.98;letter-spacing:-.01em;font-weight:700;margin-bottom:15px;text-transform:uppercase;color:var(--paper);}
+.landing-root h1 em{font-style:normal;display:block;background:linear-gradient(96deg,#fff,var(--blue) 58%,var(--pink)); -webkit-background-clip:text;background-clip:text;color:transparent}
+.landing-root h2{font-size:clamp(24px,2.5vw,34px);line-height:1.09;letter-spacing:-.01em;font-weight:600;margin-bottom:11px;text-transform:uppercase;color:var(--paper);}
+.landing-root h3{color:var(--paper);}
+.landing-root p.l{font-size:clamp(13px,1vw,15px);line-height:1.75;color:#C3D2E2;font-weight:400;}
 
 /* HUD Elements */
 .hud{position:fixed;z-index:10;font-size:11px; font-weight: 500;

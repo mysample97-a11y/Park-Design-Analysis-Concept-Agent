@@ -816,3 +816,35 @@ export function tableHTML(headers, rows, caption = "") {
   t += `</table>`;
   return t;
 }
+
+/**
+ * Field-contract guard.
+ *
+ * The prompts ask the model for a fixed set of keys. When the model omits one -
+ * which happens when the response is long and the tail fields get squeezed - the
+ * report silently printed "(not generated)" in sections 8 and 10 and the user only
+ * discovered it after exporting. This returns the names of expected keys that came
+ * back missing or empty, so the tool can say so plainly instead.
+ *
+ * Returns [] when everything expected is present.
+ */
+export function missingFields(obj, expected = []) {
+  if (!obj || typeof obj !== "object") return expected.slice();
+  return expected.filter((k) => {
+    const v = obj[k];
+    if (v == null) return true;
+    if (typeof v === "string") return v.trim() === "";
+    if (Array.isArray(v)) return v.length === 0;
+    return false;
+  });
+}
+
+/** Human-readable warning for a set of missing keys. */
+export function missingFieldsNote(missing = []) {
+  if (!missing.length) return "";
+  return (
+    "The model did not return: " + missing.join(", ") +
+    ". These sections of the report will be empty. Run the analysis again - this is " +
+    "usually a truncated response rather than a failure of the input data."
+  );
+}
