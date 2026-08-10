@@ -32,7 +32,9 @@ export const TOOL_SPECS = {
       "Gradient and cross-fall compliance cannot be verified without survey-grade elevation data. Where elevation data is absent, gradient items are reported as Pending rather than Pass.",
       "Capacity figures are indicative planning bands, not modelled occupancy.",
     ],
-    refs: [],
+    refs: [
+      { t: "Comprehensive Guide to Site Analysis Checklist for Architectural Projects", o: "Architects Registration Council of Nigeria (ARCON)", y: "", u: "" },
+    ],
     convention:
       "Accessibility findings should record the specific standard each element was measured against, not a bare pass or fail, so the check is auditable.",
   },
@@ -99,7 +101,9 @@ export const TOOL_SPECS = {
       "Thematic clustering is model-generated grouping, not coded qualitative analysis by a trained researcher.",
       "Small response counts produce unreliable thematic groupings; interpret with caution below approximately 30 responses.",
     ],
-    refs: [],
+    refs: [
+      { t: "Assessment of the quality of urban parks and their impact on user satisfaction", o: "Jung et al.", y: "", u: "" },
+    ],
     convention:
       "Survey reporting should always state the response count and, where known, how respondents were recruited. Findings without a stated denominator are not interpretable.",
   },
@@ -161,7 +165,9 @@ export const TOOL_SPECS = {
       "Water-demand categories are relative bands, not measured irrigation rates. Actual demand depends on soil, exposure, planting density and irrigation method.",
       "Species availability from local nurseries is not verified.",
     ],
-    refs: [],
+    refs: [
+      { t: "Park Design Guidelines - planting, species selection and water demand", o: "Delhi Urban Art Commission", y: "", u: "" },
+    ],
     convention:
       "Planting schedules should record botanical name, water-demand band and minimum rootable soil volume. Soil volume is the parameter most often omitted and the most common cause of canopy failure in arid urban planting.",
   },
@@ -192,7 +198,10 @@ export const TOOL_SPECS = {
       "Where local design context was researched, it reflects published sources and general practice - not a survey of local projects. Treat comparable-project references as leads to verify, not as established fact.",
       "Concepts require review by a qualified designer before selection.",
     ],
-    refs: [],
+    refs: [
+      { t: "Park Design Guidelines - zoning, circulation and facility provision", o: "Delhi Urban Art Commission", y: "", u: "" },
+      { t: "Comprehensive Guide to Site Analysis Checklist for Architectural Projects", o: "Architects Registration Council of Nigeria (ARCON)", y: "", u: "" },
+    ],
     convention:
       "Concept options should always be presented as a set with comparative scoring, never as a single recommendation, so the selection decision visibly remains with the human designer.",
   },
@@ -253,7 +262,9 @@ export const TOOL_SPECS = {
       "Sections left empty by the user are absent from the synthesis. Run the Completeness Check to have gaps identified explicitly.",
       "The Completeness Check is model-generated commentary, not an audit. It may raise items that do not apply and may miss items that do. It requires human judgement before acting on.",
     ],
-    refs: [],
+    refs: [
+      { t: "Comprehensive Guide to Site Analysis Checklist for Architectural Projects", o: "Architects Registration Council of Nigeria (ARCON)", y: "", u: "" },
+    ],
     convention:
       "A consolidated report should make its cross-disciplinary conflicts visible rather than harmonising them away, so that unresolved tensions reach the designer rather than being smoothed over.",
   },
@@ -847,4 +858,60 @@ export function missingFieldsNote(missing = []) {
     ". These sections of the report will be empty. Run the analysis again - this is " +
     "usually a truncated response rather than a failure of the input data."
   );
+}
+
+/**
+ * Parse a model JSON reply, repairing a TRUNCATED response where possible.
+ *
+ * These prompts ask for several arrays at once, so a long reply can be cut mid-array
+ * and produce "Expected ',' or ']' after array element in JSON at position N".
+ * Throwing away a mostly-complete analysis is the wrong response to that. This closes
+ * the open structures, keeps what parsed, and reports that it did so - the loss is
+ * disclosed, never silent.
+ *
+ * Returns { data, truncated }.
+ */
+export function parseModelJSON(text) {
+  const a = String(text || "").indexOf("{");
+  if (a === -1) throw new Error("The AI's reply could not be read as structured data. Try again.");
+  const src = String(text).slice(a);
+  const b = src.lastIndexOf("}");
+  if (b > 0) {
+    try { return { data: JSON.parse(src.slice(0, b + 1)), truncated: false }; } catch { /* repair below */ }
+  }
+  const repaired = repairTruncatedJSON(src);
+  if (repaired) return { data: repaired, truncated: true };
+  throw new Error(
+    "The AI's answer was cut off before it finished (response length limit) and could not be " +
+    "recovered. Try again with fewer items, or shorten your input text."
+  );
+}
+
+/** Drop the incomplete trailing element and close whatever brackets remain open. */
+export function repairTruncatedJSON(src) {
+  let inStr = false, esc = false, lastSafe = -1;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "}" || ch === "]") lastSafe = i;
+    else if (ch === ",") lastSafe = i - 1;
+  }
+  if (lastSafe < 0) return null;
+  let out = src.slice(0, lastSafe + 1);
+  const open = [];
+  inStr = false; esc = false;
+  for (let i = 0; i < out.length; i++) {
+    const ch = out[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{" || ch === "[") open.push(ch);
+    else if (ch === "}" || ch === "]") open.pop();
+  }
+  while (open.length) out += open.pop() === "{" ? "}" : "]";
+  try { return JSON.parse(out); } catch { return null; }
 }

@@ -3,7 +3,7 @@ import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCir
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { checklistPrompt } from "../utils/methodology";
-import { friendlyError , fileToBase64Raw } from "../utils/helpers";
+import { friendlyError, fileToBase64Raw, extractJSON } from "../utils/helpers";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
@@ -37,12 +37,10 @@ function fileToBase64(file) {
 
 
 
-function extractJSON(text) {
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON object found in the AI response.");
-  return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-}
+// NOTE: this file previously defined its own extractJSON here. It shadowed the
+// shared one in utils/helpers.js and had NO truncation repair, which is why this
+// tool - and only this tool - failed outright on a cut-off reply with
+// "Expected ',' or ']' after array element". It now uses the shared parser.
 
 const SITE_PROMPT =
   "You are a site analyst preparing a professional site context and accessibility analysis. Use only the location, description and any images supplied. " +
@@ -52,6 +50,7 @@ const SITE_PROMPT =
   "\"hazard_screening\":[{\"hazard\":\"flood|seismic|subsidence|contamination|high water table|coastal|storm|other\",\"likelihood\":\"Documented|Possible|Unlikely|Unknown\",\"basis\":\"why - cite what is publicly documented for this region\",\"design_implication\":\"\"}]," +
   "\"quiet_and_active_zoning\":[{\"edge\":\"\",\"suggested_character\":\"quiet/green buffer OR active/high-throughput\",\"reason\":\"tie to the adjacency - e.g. a school edge needs buffering, a transit edge needs capacity\"}]," +
   "\"key_findings\":[\"\"],\"constraints\":[\"\"],\"conclusion\":\"2-3 sentences naming the single highest-priority action\"}. " +
+  "For adjacencies: return an entry for EVERY compass edge you can establish. If an edge cannot be determined from the description, image or research, still return it with land_use set to \"Not determined - requires site visit\" rather than omitting it, so no edge silently disappears from the report. " +
   "For hazard_screening: this is a PRELIMINARY DESK SCREENING prompting professional assessment, not a hazard assessment - only report what is genuinely documented for the region and mark anything else Unknown. " +
   "For accessibility_standards: cite the standards that actually apply in the country/city given, never a default jurisdiction.";
 
@@ -111,6 +110,9 @@ export default function SiteContextAnalyzer() {
       });
       if (!resText) throw new Error("The AI returned an empty response.");
       const parsed = extractJSON(resText);
+      if (!parsed) throw new Error(
+        "The AI's reply could not be read as structured data, even after recovery. " +
+        "This is usually an over-long reply - shorten the site description and try again.");
       if (!parsed) throw new Error("The AI's reply could not be read as structured data. Try again.");
       setContext(parsed);
       // Do NOT populate the insight here. Research and insight are two separate,
@@ -182,7 +184,10 @@ export default function SiteContextAnalyzer() {
       });
 
       if (!resText) throw new Error("The AI returned an empty response.");
-      setInsight(extractJSON(resText));
+      const parsedInsight = extractJSON(resText);
+      if (!parsedInsight) throw new Error(
+        "The AI's reply could not be read as structured data, even after recovery. Try again.");
+      setInsight(parsedInsight);
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -194,9 +199,9 @@ export default function SiteContextAnalyzer() {
     let lines = ["SITE CONTEXT, URBAN FABRIC & ACCESSIBILITY", `Location: ${location || "Not specified"}`, ""];
     if (context) {
       lines.push("ADJACENT LAND-USE");
-      (context.adjacencies || []).forEach((a) => lines.push(`  ${a.direction}: ${a.use} - ${a.implication}`));
+      (context.adjacencies || []).forEach((a) => lines.push(`  ${a.direction}: ${a.land_use || "not determined"} - ${a.demand_implication || "not determined"}`));
       lines.push("", "ACCESSIBILITY STANDARDS");
-      (context.accessibility_standards || []).forEach((s) => lines.push(`  ${s.label}: ${s.value} (source: ${s.source})`));
+      (context.accessibility_standards || []).forEach((s) => lines.push(`  ${s.requirement || s.label}: ${s.value} (source: ${s.source})`));
     }
     lines.push("", "ZONE CAPACITY");
     zones.filter((z) => z.name.trim()).forEach((z) => { const c = capacityRange(z.area); lines.push(`  ${z.name} (${z.area}m2): ${c.low}-${c.high} peak visitors`); });
@@ -232,13 +237,13 @@ export default function SiteContextAnalyzer() {
         if ((context?.adjacencies || []).length) F.push({
           title: "Adjacent land use",
           headers: ["Edge", "Adjacent land use", "Implication"],
-          rows: context.adjacencies.map((a) => [a.direction || "-", a.use || "-", a.implication || "-"]),
+          rows: context.adjacencies.map((a) => [a.direction || "-", a.land_use || "Not determined", a.demand_implication || "Not determined"]),
         });
         if ((context?.accessibility_standards || []).length) F.push({
           title: "Accessibility standards researched for this location",
           note: "Each threshold is recorded with the standard it derives from, so the check is auditable.",
           headers: ["Requirement", "Value", "Source"],
-          rows: context.accessibility_standards.map((x) => [x.label || "-", x.value || "-", x.source || "-"]),
+          rows: context.accessibility_standards.map((x) => [x.requirement || x.label || "-", x.value || "-", x.source || "-"]),
         });
         const namedZones = zones.filter((z) => z.name.trim());
         if (namedZones.length) F.push({
@@ -359,7 +364,7 @@ export default function SiteContextAnalyzer() {
 
             <div className="bg-white rounded-lg border border-[#E8E2D5] overflow-hidden">
               <div className="px-4 py-3 border-b border-[#E8E2D5]"><h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445]">Accessibility Standards (researched for this location)</h2></div>
-              <div className="p-4 space-y-2">{(context.accessibility_standards || []).map((s, i) => (<div key={i} className="flex items-center justify-between text-xs border border-[#F0EBDF] rounded px-3 py-2"><span className="text-[#5A5445]">{s.label}</span><span className="font-mono font-semibold">{s.value}</span><span className="text-[9px] text-[#8A8474] italic">{s.source}</span></div>))}</div>
+              <div className="p-4 space-y-2">{(context.accessibility_standards || []).map((s, i) => (<div key={i} className="flex items-center justify-between text-xs border border-[#F0EBDF] rounded px-3 py-2"><span className="text-[#5A5445]">{s.requirement || s.label}</span><span className="font-mono font-semibold">{s.value}</span><span className="text-[9px] text-[#8A8474] italic">{s.source}</span></div>))}</div>
             </div>
           </>
         )}

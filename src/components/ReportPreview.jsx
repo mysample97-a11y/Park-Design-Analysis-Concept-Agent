@@ -6,13 +6,18 @@ import { FileText, ChevronDown, ChevronRight, RefreshCw, Info } from "lucide-rea
  * Lets the user read exactly what will be exported, and regenerate insight first.
  */
 export default function ReportPreview({ reportText, chartsHtml, docRef, onRegenerate, regenerating, includeOverflow, setIncludeOverflow, sourceNote, sourceCount }) {
-  // "has content" = the report carries generated findings, not just the static scaffold
-  const hasContent =
+  // "has findings" = the analysis produced actual content in section 6.
+  // NOTE: this deliberately does NOT require sections 8 and 10 to be populated.
+  // It used to. That meant when the model omitted overall_summary/conclusion, both
+  // sections read "(not generated)", hasContent went false, and the ENTIRE preview
+  // panel returned null - so the user lost the ability to read or re-run the report
+  // at exactly the moment something had gone wrong with it.
+  const hasFindings = !!reportText && !reportText.includes("(no findings generated");
+  const missingInsight =
     !!reportText &&
-    !reportText.includes("(no findings generated") &&
-    // section 8 AND 10 both empty means no AI insight has been generated yet
-    !(reportText.includes("[8] INTERPRETATION\n  (not generated)") &&
-      reportText.includes("[10] CONCLUSIONS AND RECOMMENDATIONS\n  (not generated)"));
+    reportText.includes("[8] INTERPRETATION\n  (not generated)") &&
+    reportText.includes("[10] CONCLUSIONS AND RECOMMENDATIONS\n  (not generated)");
+  const hasContent = hasFindings;
   const [open, setOpen] = useState(false);
   const [touched, setTouched] = useState(false);
 
@@ -22,10 +27,8 @@ export default function ReportPreview({ reportText, chartsHtml, docRef, onRegene
     if (!touched && hasContent) setOpen(true);
   }, [hasContent, touched]);
 
-  // Only show the panel once the analysis has actually produced findings.
-  // Previously it rendered as soon as any state changed, so clicking a research
-  // button appeared to "generate the report" before the insight had been run.
-  if (!reportText || !hasContent) return null;
+  // Only hide the panel when there is genuinely nothing to read.
+  if (!reportText || !hasFindings) return null;
 
   return (
     <div className="card">
@@ -43,6 +46,16 @@ export default function ReportPreview({ reportText, chartsHtml, docRef, onRegene
 
       {open && (
         <div className="p-4 space-y-3">
+          {missingInsight && (
+            <div className="rounded-md border-2 p-3 flex gap-2" style={{ borderColor: "#B8863B", backgroundColor: "#FBF1E1" }}>
+              <Info size={14} style={{ color: "#B8863B", flexShrink: 0, marginTop: 2 }} />
+              <p className="text-[11px] text-brand-text">
+                <strong>Sections 8 and 10 are empty.</strong> The findings below are complete, but the
+                model did not return an interpretation or conclusions - usually a truncated reply
+                rather than a problem with your input. Re-run the insight before exporting.
+              </p>
+            </div>
+          )}
           {(sourceNote || sourceCount > 0) && (
             <div className="flex items-start gap-2 rounded p-2.5 border"
                  style={{ borderColor: sourceCount > 0 ? "#3D7A5C55" : "#B8863B55",
