@@ -249,6 +249,8 @@ export default function SurveyAnalyzer() {
       run({ ...structuredOpts(), overflow: o });
     } else run(structuredOpts());
   }
+  function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
+
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
   function exportPDF() {

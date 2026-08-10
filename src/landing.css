@@ -91,7 +91,7 @@ body.nexus-active #layer-nexus { opacity: 1; pointer-events: auto; }
     box-shadow: 0 20px 50px rgba(0,0,0,0.8);
 }
 #nexus-title { font-size: 16px; letter-spacing: 0.15em; color: var(--pink); margin-bottom: 15px; font-weight: 700; line-height: 1.4;}
-#nexus-desc { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.8; color: #8595A8; font-weight: 300;}
+#nexus-desc { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.8; color: #C3D2E2; font-weight: 400;}
 
 /* --- LAYER 3: SCROLLABLE TEXT BLOCKS --- */
 .flow { position: relative; z-index: 5; width: 100vw; transition: opacity 0.5s; padding-bottom: 50vh; }
@@ -105,10 +105,19 @@ body.nexus-active .flow { opacity: 0; pointer-events: none; }
 
 .ph{font-size:12px;letter-spacing:.34em; color:var(--blue);margin-bottom:14px;display:flex;align-items:center;gap:9px}
 .ph i{width:22px;height:1px;background:var(--blue)}
-h1{font-size:clamp(36px,4vw,55px);line-height:.98;letter-spacing:-.01em;font-weight:700;margin-bottom:15px; text-transform: uppercase;}
+/* Headings carry an EXPLICIT colour. They previously relied on inheriting
+   body{color:var(--paper)} from this file - but index.css also sets a body colour
+   (text-brand-dark, for the light app UI). Which one wins depends on cascade-layer
+   and bundle order, so on the deployed build the stage headings rendered dark on a
+   dark glass panel and became unreadable. Stating the colour here removes the
+   dependency entirely. Same reasoning for the body copy, lifted off the old #8595A8
+   which was too dim to read over the video. */
+.pane .box h1, .pane .box h2, .pane .box h3 { color: var(--paper); }
+h1{font-size:clamp(36px,4vw,55px);line-height:.98;letter-spacing:-.01em;font-weight:700;margin-bottom:15px; text-transform: uppercase; color:var(--paper);}
 h1 em{font-style:normal;display:block;background:linear-gradient(96deg,#fff,var(--blue) 58%,var(--pink)); -webkit-background-clip:text;background-clip:text;color:transparent}
-h2{font-size:clamp(24px,2.5vw,34px);line-height:1.09;letter-spacing:-.01em;font-weight:600;margin-bottom:11px; text-transform: uppercase;}
-p.l{font-size:clamp(13px,1vw,15px);line-height:1.7;color:#8595A8; font-weight: 300;}
+h2{font-size:clamp(24px,2.5vw,34px);line-height:1.09;letter-spacing:-.01em;font-weight:600;margin-bottom:11px; text-transform: uppercase; color:var(--paper);}
+h3{color:var(--paper);}
+p.l{font-size:clamp(13px,1vw,15px);line-height:1.75;color:#C3D2E2; font-weight: 400;}
 
 /* HUD Elements */
 .hud{position:fixed;z-index:10;font-size:11px; font-weight: 500;

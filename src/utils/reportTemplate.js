@@ -425,11 +425,20 @@ export function buildStructuredReportHTML({ toolCode, meta = {}, docRef, chartsH
   const spec = TOOL_SPECS[toolCode];
   const text = buildStructuredReport({ toolCode, meta, docRef, ...rest });
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  // Heading hierarchy. The previous rule promoted ANY all-caps line over 8 chars to
+  // <h1> - so model-written headings inside the findings ("ADJACENT LAND-USE",
+  // "ACCESSIBILITY STANDARDS") rendered LARGER than the "[6] FINDINGS" heading that
+  // contains them, and the report read as a flat merge rather than nested sections.
+  // Now: line 0 is the report title, [n]/APPENDIX are sections, "6.1 TITLE" is a
+  // finding, and any other all-caps line is subordinate content inside a finding.
   const body = text
     .split("\n")
-    .map((line) => {
-      if (/^\[\d+\]/.test(line) || /^APPENDIX/.test(line)) return `<h2>${esc(line)}</h2>`;
-      if (/^[A-Z][A-Z &,\-]+$/.test(line.trim()) && line.trim().length > 8) return `<h1>${esc(line)}</h1>`;
+    .map((line, i) => {
+      const t = line.trim();
+      if (i === 0) return `<h1>${esc(t)}</h1>`;
+      if (/^\[\d+\]/.test(line) || /^APPENDIX/.test(line)) return `<h2>${esc(t)}</h2>`;
+      if (/^\s+\d+\.\d+\s+/.test(line)) return `<h3>${esc(t)}</h3>`;
+      if (/^[A-Z][A-Z0-9 &,\-/()]+$/.test(t) && t.length > 8) return `<h4>${esc(t)}</h4>`;
       if (line.trim() === "---") return "<hr/>";
       return `<p>${esc(line)}</p>`;
     })
@@ -439,11 +448,15 @@ export function buildStructuredReportHTML({ toolCode, meta = {}, docRef, chartsH
     : body;
   return `<html><head><title>${esc(spec.name)} - ${esc(docRef)}</title><style>
     body{font-family:Arial,Helvetica,sans-serif;padding:32px;color:#1C2333;line-height:1.45;}
-    h1{font-size:19px;color:#1C2333;border-bottom:2px solid #C9A46A;padding-bottom:6px;}
-    h2{font-size:13px;color:#5A5445;margin-top:20px;margin-bottom:4px;border-bottom:1px solid #E8E2D5;}
-    p{font-size:11.5px;margin:2px 0;white-space:pre-wrap;}
+    h1{font-size:20px;color:#1C2333;border-bottom:2px solid #C9A46A;padding-bottom:6px;margin-bottom:14px;}
+    h2{font-size:14px;color:#1C2333;font-weight:700;letter-spacing:.04em;margin-top:22px;margin-bottom:6px;
+       border-bottom:1px solid #C9A46A;padding-bottom:3px;}
+    h3{font-size:12px;color:#5A5445;font-weight:700;margin:14px 0 3px 14px;letter-spacing:.03em;}
+    h4{font-size:11px;color:#8A6A3A;font-weight:700;margin:10px 0 2px 26px;letter-spacing:.05em;
+       text-transform:uppercase;}
+    p{font-size:11.5px;margin:2px 0 2px 26px;white-space:pre-wrap;}
     hr{border:none;border-top:1px solid #E8E2D5;margin:18px 0;}
-    .charts{margin:12px 0;}
+    .charts{margin:12px 0 12px 26px;}
     </style></head><body>${injected}</body></html>`;
 }
 

@@ -1,5 +1,11 @@
 import { useEffect } from "react";
 import { Settings, HelpCircle, FolderCog } from "lucide-react";
+import "@fontsource/inter/300.css";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/rajdhani/500.css";
+import "@fontsource/rajdhani/600.css";
+import "@fontsource/rajdhani/700.css";
 import "../landing.css";
 
 /**

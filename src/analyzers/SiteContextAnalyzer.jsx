@@ -113,7 +113,13 @@ export default function SiteContextAnalyzer() {
       const parsed = extractJSON(resText);
       if (!parsed) throw new Error("The AI's reply could not be read as structured data. Try again.");
       setContext(parsed);
-      setInsight(parsed);
+      // Do NOT populate the insight here. Research and insight are two separate,
+      // separately-consented AI steps: this call establishes the standards and
+      // adjacencies, and "Generate AI Insight" interprets them. Setting both from
+      // one run made the research button appear to trigger insight generation.
+      // Clearing it also prevents a previous location's insight persisting.
+      setInsight(null);
+      setInsightError("");
     } catch (e) {
       setContextError(e.message || "Something went wrong analysing the site. Try again.");
     } finally {

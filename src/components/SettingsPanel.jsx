@@ -297,7 +297,9 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
 
         {/* Claude Key */}
         <div id="sp-keys" className="scroll-mt-4 space-y-4">
-        <div className="space-y-1.5">
+        {/* Framed to match every other settings block. Previously bare, so the key
+           input sat flush against the card edge with no container of its own. */}
+        <div className="border border-brand-border rounded-lg p-4 space-y-1.5">
           <label className="text-xs font-semibold text-brand-text uppercase tracking-wide flex items-center gap-1">
             <KeyRound size={12} /> Claude API Key
           </label>
@@ -342,7 +344,7 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* Gemini Key */}
-        <div className="space-y-1.5">
+        <div className="border border-brand-border rounded-lg p-4 space-y-1.5">
           <label className="text-xs font-semibold text-brand-text uppercase tracking-wide flex items-center gap-1">
             <KeyRound size={12} /> Gemini API Key
           </label>

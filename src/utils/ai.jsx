@@ -51,7 +51,22 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
     }
     parts.push({ inlineData: { mimeType, data: base64String } });
   }
-  parts.push({ text: typeof content === "string" ? content : JSON.stringify(content) });
+  // As in callClaude: `content` may be an array of Anthropic-style content blocks
+  // (how the analyzers send uploaded images). Gemini uses a different shape, so
+  // translate rather than stringify - stringifying sends base64 as text and the
+  // model sees no image.
+  if (Array.isArray(content)) {
+    content.forEach((b) => {
+      if (!b || typeof b !== "object") return;
+      if (b.type === "image" && b.source?.data) {
+        parts.push({ inlineData: { mimeType: b.source.media_type || "image/png", data: b.source.data } });
+      } else if (b.type === "text" && b.text) {
+        parts.push({ text: b.text });
+      }
+    });
+  } else {
+    parts.push({ text: typeof content === "string" ? content : JSON.stringify(content) });
+  }
 
   const payload = { contents: [{ role: "user", parts }] };
   if (maxTokens) payload.generationConfig = { maxOutputTokens: maxTokens };
@@ -139,7 +154,16 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
     }
     blocks.push({ type: "image", source: { type: "base64", media_type: mimeType, data: base64String } });
   }
-  blocks.push({ type: "text", text: typeof content === "string" ? content : JSON.stringify(content) });
+  // Callers may pass `content` either as a plain string, or as a ready-made array
+  // of Anthropic content blocks (this is how the analyzers send uploaded images).
+  // Stringifying that array would send the base64 payload as TEXT - the model
+  // would receive no image at all, burn the token budget, and return nothing
+  // useful. Pass an array straight through instead.
+  if (Array.isArray(content)) {
+    content.forEach((b) => { if (b && typeof b === "object") blocks.push(b); });
+  } else {
+    blocks.push({ type: "text", text: typeof content === "string" ? content : JSON.stringify(content) });
+  }
 
   const payload = {
     model: model || "claude-sonnet-4-6",
