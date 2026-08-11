@@ -139,6 +139,23 @@ export default function BudgetTracker() {
     } finally { setResearching(false); }
   }
 
+
+  // Supplied to readExportFile: called only when a PDF has no text layer. The pages
+  // arrive already rendered as image blocks; both providers accept them.
+  async function readScannedPages(blocks, info) {
+    if (!apiKey) throw new Error(
+      "This PDF is a scan with no embedded text layer. To read it as images, add an API key " +
+      "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
+      "same content, read instantly, and need no key at all.");
+    return await callAI({
+      provider, apiKey, model, maxTokens: 3000,
+      content: [
+        ...blocks,
+        { type: "text", text: `These are ${info.pagesRendered} page image(s) from a scanned document. Transcribe ALL text you can read, preserving headings, tables and reading order. Respond with ONLY the transcribed text - no commentary.` },
+      ],
+    });
+  }
+
   async function handleFacilityFile(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -147,8 +164,8 @@ export default function BudgetTracker() {
       // Shared reader. The old code read only the FIRST sheet of a workbook - but the
       // reports this suite exports carry eleven sheets, so the facility schedule was
       // silently missed. It also could not read PDF at all.
-      const res = await readExportFile(file);
-      const text = res.text;
+      const res = await readExportFile(file, undefined, readScannedPages);
+      const text = res.digest || res.text;
       setPasteText((prev) => (prev ? prev + "\n\n" : "") + text);
     } catch (err) {
       setDetectError(err.message || "Could not read this file.");

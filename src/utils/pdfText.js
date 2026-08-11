@@ -24,11 +24,11 @@ async function getPdfjs() {
       // this working under the app's `default-src 'self'` content security policy.
       const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-      // Standard font data must be bundled too, or PDFs using the base-14 fonts
-      // emit "Ensure that the standardFontDataUrl API parameter is provided" and
-      // can drop glyphs. Resolved from the local package, not a CDN, so this stays
-      // inside the app's default-src 'self' policy.
-      stdFontUrl = new URL("pdfjs-dist/standard_fonts/", import.meta.url).href;
+      // Standard font data. The previous value used a BARE package specifier inside
+      // new URL(), which Vite does not resolve - it produced a 404 path at runtime.
+      // The fonts are copied into /public/pdf-fonts instead, so this resolves against
+      // the deployed site and stays inside the default-src 'self' policy.
+      stdFontUrl = new URL("pdf-fonts/", document.baseURI).href;
       return pdfjs;
     });
   }
@@ -82,10 +82,58 @@ export async function extractPdfText(file, onProgress) {
     return {
       text: "", pages, empty: true,
       note:
-        `This PDF has ${pages} page${pages === 1 ? "" : "s"} but no embedded text layer, ` +
-        "which means it is a scan or an exported image. Text cannot be extracted from it in " +
-        "the browser. Run it through OCR first, or paste the text into the box above.",
+        `This PDF has ${pages} page${pages === 1 ? "" : "s"} but no embedded text layer - it is a ` +
+        "scan or an image export, so there is no text in the file to read. " +
+        "Fastest fix: upload the .xlsx export instead - it carries every report section and " +
+        "needs no AI. Alternatively add an API key in Settings and re-upload this PDF; the " +
+        "pages will then be read as images.",
     };
   }
   return { text, pages, empty: false, note: `Extracted ${text.length.toLocaleString()} characters from ${pages} page${pages === 1 ? "" : "s"}.` };
+}
+
+/**
+ * Rasterise PDF pages to PNG data for the AI vision path.
+ *
+ * Used ONLY when extractPdfText finds no embedded text layer - i.e. the PDF is a
+ * scan or an image export. Telling the user to "run OCR first" is not a real
+ * answer when the whole point of the tool chain is that a report exported from one
+ * tool feeds straight into the next.
+ *
+ * Returns Anthropic-style content blocks, which the AI router already translates
+ * for Gemini - so this works on BOTH providers, not just Claude.
+ *
+ * @param {File|Blob} file
+ * @param {number} maxPages  cap so a long scan cannot blow the token budget
+ */
+export async function rasterizePdf(file, maxPages = 6, onProgress) {
+  const pdfjs = await getPdfjs();
+  const buf = await file.arrayBuffer();
+  const loadingTask = pdfjs.getDocument({ data: buf, isEvalSupported: false, standardFontDataUrl: stdFontUrl });
+  const doc = await loadingTask.promise;
+  const total = Math.min(doc.numPages, maxPages);
+  const blocks = [];
+
+  for (let n = 1; n <= total; n++) {
+    if (typeof onProgress === "function") onProgress(n, total);
+    const page = await doc.getPage(n);
+    // 2x scale: enough for the model to read body text without producing an
+    // image so large it dominates the request.
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.min(viewport.width, 1600);
+    canvas.height = Math.round(viewport.height * (canvas.width / viewport.width));
+    const ctx = canvas.getContext("2d");
+    const scaled = page.getViewport({ scale: 2 * (canvas.width / viewport.width) });
+    await page.render({ canvasContext: ctx, viewport: scaled }).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+    blocks.push({
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: dataUrl.split(",")[1] },
+    });
+    page.cleanup();
+  }
+  const pages = doc.numPages;
+  try { doc.cleanup?.(); await loadingTask.destroy?.(); } catch { /* rasterise already succeeded */ }
+  return { blocks, pagesRendered: total, pagesTotal: pages };
 }

@@ -57,13 +57,34 @@ export default function ConceptGenerator() {
   // open an exported report, select all, copy and paste it in by hand - for every run.
   const [briefFileNote, setBriefFileNote] = useState("");
   const [briefFileError, setBriefFileError] = useState("");
+
+  // Supplied to readExportFile: called only when a PDF has no text layer. The pages
+  // arrive already rendered as image blocks; both providers accept them.
+  async function readScannedPages(blocks, info) {
+    if (!apiKey) throw new Error(
+      "This PDF is a scan with no embedded text layer. To read it as images, add an API key " +
+      "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
+      "same content, read instantly, and need no key at all.");
+    return await callAI({
+      provider, apiKey, model, maxTokens: 3000,
+      content: [
+        ...blocks,
+        { type: "text", text: `These are ${info.pagesRendered} page image(s) from a scanned document. Transcribe ALL text you can read, preserving headings, tables and reading order. Respond with ONLY the transcribed text - no commentary.` },
+      ],
+    });
+  }
+
   async function handleBriefFile(file) {
     if (!file) return;
     setBriefFileError(""); setBriefFileNote("Reading file...");
     try {
-      const res = await readExportFile(file, (p, total) => setBriefFileNote(`Reading page ${p} of ${total}...`));
+      const res = await readExportFile(file, (p, total) => setBriefFileNote(`Reading page ${p} of ${total}...`), readScannedPages);
       // Append rather than overwrite, so several tool exports can be combined.
-      setBrief((prev) => (prev ? prev.trim() + "\n\n" : "") + `--- ${file.name} ---\n` + res.text);
+      // Use the structured digest when the upload is one of this suite's reports -
+      // boilerplate stripped, findings and tables preserved. Falls back to raw text
+      // for anything else, so a third-party document still works.
+      const body = res.digest || res.text;
+      setBrief((prev) => (prev ? prev.trim() + "\n\n" : "") + `--- ${file.name} ---\n` + body);
       setBriefFileNote(`${file.name}: ${res.note}`);
     } catch (err) {
       setBriefFileNote(""); setBriefFileError(err.message || "Could not read that file.");

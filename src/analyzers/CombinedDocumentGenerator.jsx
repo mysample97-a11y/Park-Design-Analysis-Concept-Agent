@@ -48,35 +48,37 @@ export default function CombinedDocumentGenerator() {
 
   function updateInput(id, val) { setInputs((prev) => ({ ...prev, [id]: val })); }
 
+
+  // Supplied to readExportFile: called only when a PDF has no text layer. The pages
+  // arrive already rendered as image blocks; both providers accept them.
+  async function readScannedPages(blocks, info) {
+    if (!apiKey) throw new Error(
+      "This PDF is a scan with no embedded text layer. To read it as images, add an API key " +
+      "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
+      "same content, read instantly, and need no key at all.");
+    return await callAI({
+      provider, apiKey, model, maxTokens: 3000,
+      content: [
+        ...blocks,
+        { type: "text", text: `These are ${info.pagesRendered} page image(s) from a scanned document. Transcribe ALL text you can read, preserving headings, tables and reading order. Respond with ONLY the transcribed text - no commentary.` },
+      ],
+    });
+  }
+
   async function handleSectionFile(sectionId, file) {
     if (!file) return;
     setFileLoading((f) => ({ ...f, [sectionId]: true }));
     setFileErrors((f) => ({ ...f, [sectionId]: "" }));
     try {
-      const name = file.name.toLowerCase();
-      let extracted = "";
-      if (name.endsWith(".txt")) {
-        extracted = await file.text();
-      } else if (name.endsWith(".docx")) {
-        const arrayBuffer = await file.arrayBuffer();
-        const res = await mammoth.extractRawText({ arrayBuffer });
-        extracted = res.value;
-      } else if (name.endsWith(".rtf")) {
-        extracted = stripRTF(await file.text());
-      } else if (/\.(pdf|xlsx|xls|csv|md|json)$/.test(name)) {
-        // Shared reader: spreadsheets, PDFs and plain formats all read locally in
-        // the browser. .xlsx used to be rejected here even though it is what every
-        // analysis tool exports, which forced the user to copy-paste by hand.
-        const res = await readExportFile(file, (p, total) =>
-          setFileErrors((fe) => ({ ...fe, [sectionId]: `Reading page ${p} of ${total}...` })));
-        setFileErrors((fe) => ({ ...fe, [sectionId]: "" }));
-        extracted = res.text;
-        setPdfNotes((n) => ({ ...n, [sectionId]: res.note }));
-      } else if (name.endsWith(".doc")) {
-        throw new Error("Old .doc format isn't supported - save as .docx, or paste the text.");
-      } else {
-        throw new Error("Unsupported file type - use .txt, .docx, .rtf, or .pdf.");
-      }
+      // Single path for every format. The .txt/.docx/.rtf branches used to bypass the
+      // shared reader, so those uploads skipped the suite-report parser and arrived as
+      // an undifferentiated blob - the exact thing the digest exists to prevent.
+      const res = await readExportFile(file,
+        (p, total) => setFileErrors((fe) => ({ ...fe, [sectionId]: `Reading page ${p} of ${total}...` })),
+        readScannedPages);
+      setFileErrors((fe) => ({ ...fe, [sectionId]: "" }));
+      let extracted = res.digest || res.text;
+      setPdfNotes((n) => ({ ...n, [sectionId]: res.note }));
       updateInput(sectionId, (inputs[sectionId] ? inputs[sectionId] + "\n\n" : "") + (extracted || "").trim());
     } catch (e) {
       setFileErrors((f) => ({ ...f, [sectionId]: e.message || "Could not read this file." }));
@@ -278,7 +280,7 @@ export default function CombinedDocumentGenerator() {
 
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed.</p>
+        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: reader-v4]</p>
       </div>
 
       <div className="card">
