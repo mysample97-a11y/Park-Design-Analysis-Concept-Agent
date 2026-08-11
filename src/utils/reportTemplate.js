@@ -247,7 +247,7 @@ export const TOOL_SPECS = {
     excludes:
       "new analysis within the synthesis itself. The constraints matrix, design implications and concept brief are built ONLY from what you supply. The optional Completeness Check does look outward - but its output is kept in a separate section and never merged into the matrix, so your findings and the model's commentary remain distinguishable.",
     deterministic: [
-      "Parsing of supplied documents (.docx, .rtf, .txt) into text for synthesis",
+      "Parsing of supplied documents (.docx, .rtf, .txt, .pdf) into text for synthesis. PDF text is extracted locally in the browser via the embedded text layer - no AI and no API key involved, so it is reproducible and works on every provider",
       "Structural assembly of the compiled report from its constituent sections",
     ],
     inferential: [
@@ -257,6 +257,7 @@ export const TOOL_SPECS = {
       "Composition of the consolidated concept brief",
     ],
     limitations: [
+      "PDF extraction reads the embedded text layer. A scanned or image-only PDF has no text layer and cannot be read this way; it is detected and reported rather than returning an empty section.",
       "This report inherits every assumption and limitation of the sections supplied to it. It cannot be more reliable than its inputs.",
       "Synthesis is model-generated. Cross-references should be checked against the source sections before reliance.",
       "Sections left empty by the user are absent from the synthesis. Run the Completeness Check to have gaps identified explicitly.",

@@ -34,6 +34,10 @@ export default function BudgetTracker() {
     { id: uid(), name: "", area: "", rate: "" },
   ]);
   const [rates, setRates] = useState(DEFAULT_RATES);
+  // PDF export uses a new tab; browsers block that silently. This surfaces it -
+  // the previous code called a setError() that was never declared in this file, so
+  // the typeof guard swallowed the message and the click appeared to do nothing.
+  const [pdfError, setPdfError] = useState("");
   const [pasteText, setPasteText] = useState("");
   const [location, setLocation] = useState("");
   const [currency, setCurrency] = useState("");
@@ -269,8 +273,9 @@ export default function BudgetTracker() {
   function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
   function exportPDF() {
+    setPdfError("");
     withOverflow((o) => exportStructuredPDF(o, () => {
-      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+      setPdfError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again.");
     }));
   }
 
@@ -499,7 +504,8 @@ export default function BudgetTracker() {
 
       <div className="card p-4">
         <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h3>
-        <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />
+        {pdfError && <p className="text-[11px] text-brand-danger mb-2 flex items-center gap-1"><AlertTriangle size={11} /> {pdfError}</p>}
+              <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />
       </div>
     </div>
   );

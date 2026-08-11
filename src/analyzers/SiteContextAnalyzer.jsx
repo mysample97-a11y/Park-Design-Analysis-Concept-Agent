@@ -57,6 +57,10 @@ const SITE_PROMPT =
 export default function SiteContextAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [imageNotes, setImageNotes] = useState("");
+  // PDF export opens a new tab; browsers block that silently. This surfaces it -
+  // the previous code called a setError() never declared in this file, so the typeof
+  // guard swallowed the message and the click appeared to do nothing at all.
+  const [pdfError, setPdfError] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
   const [location, setLocation] = useState("");
   const [siteDescription, setSiteDescription] = useState("");
@@ -309,8 +313,9 @@ export default function SiteContextAnalyzer() {
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
   function exportPDF() {
+    setPdfError("");
     withOverflow((o) => exportStructuredPDF(o, () => {
-      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+      setPdfError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again.");
     }));
   }
 
@@ -498,6 +503,7 @@ export default function SiteContextAnalyzer() {
 
         <div className="bg-[#FFFFFF] rounded-lg border-2 border-[#E8E2D5] p-4">
           <h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445] mb-3">Export Report</h2>
+          {pdfError && <p className="text-[11px] text-brand-danger mb-2 flex items-center gap-1"><AlertTriangle size={11} /> {pdfError}</p>}
           <div className="flex flex-wrap gap-2">
             <button onClick={exportExcel} className="text-xs font-medium border border-[#DDD6C9] px-3 py-2 rounded-md flex items-center gap-1 hover:border-[#C9A46A]"><FileSpreadsheet size={13} /> Excel (.xlsx)</button>
             <button onClick={exportWord} className="text-xs font-medium border border-[#DDD6C9] px-3 py-2 rounded-md flex items-center gap-1 hover:border-[#C9A46A]"><FileText size={13} /> Word (.rtf)</button>

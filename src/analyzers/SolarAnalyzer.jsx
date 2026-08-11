@@ -90,6 +90,10 @@ function buildDayData(month, day, lat, lon, utcOffset) {
 export default function SolarAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
+  // PDF export opens a new tab; browsers block that silently. This surfaces it -
+  // the previous code called a setError() never declared in this file, so the typeof
+  // guard swallowed the message and the click appeared to do nothing at all.
+  const [pdfError, setPdfError] = useState("");
   const [siteInfo, setSiteInfo] = useState(null);
   const [siteLoading, setSiteLoading] = useState(false);
   const [siteError, setSiteError] = useState("");
@@ -372,8 +376,9 @@ export default function SolarAnalyzer() {
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
 
   function exportPDF() {
+    setPdfError("");
     withOverflow((o) => exportStructuredPDF(o, () => {
-      if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
+      setPdfError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again.");
     }));
   }
 
@@ -478,6 +483,7 @@ export default function SolarAnalyzer() {
 
             <div className="p-4">
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Export Report</h2>
+              {pdfError && <p className="text-[11px] text-brand-danger mb-2 flex items-center gap-1"><AlertTriangle size={11} /> {pdfError}</p>}
               <ExportButtons onExcel={exportExcel} onWord={exportWord} onPDF={exportPDF} />
             </div>
           </div>
