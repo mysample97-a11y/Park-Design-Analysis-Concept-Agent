@@ -131,7 +131,7 @@ export default function VegetationAnalyzer() {
           "(2) 'inventory_guidance': 1-2 sentences on how any existing inventory should inform retain/remove decisions (or note if none was provided), " +
           "(3) 'suggested_species': an array of 3-5 objects {name, reason} - species FROM THE REFERENCE PALETTE ONLY, each with a one-line reason tied to this site's actual conditions, " +
           "(4) 'conclusion': 2-3 sentences giving the single clearest planting/terrain/soil action to take next. " +
-          "Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("VEG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+          "Also return 'existing_value': a short paragraph on the ecological and amenity value of the existing planting and what is lost if it is cleared. Also return 'existing_vegetation': an array of {species, approx_count, condition, position, verdict (retain/relocate/remove), reason} assessing the existing planting inventory supplied - return an empty array if no inventory was given. Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"existing_value\": \"\", \"existing_vegetation\": [{\"species\": \"\", \"approx_count\": \"\", \"condition\": \"\", \"position\": \"\", \"verdict\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("VEG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {

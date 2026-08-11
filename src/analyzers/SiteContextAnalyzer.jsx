@@ -213,10 +213,10 @@ export default function SiteContextAnalyzer() {
     paths.filter((p) => p.name.trim()).forEach((p) => lines.push(`  ${p.name} (${p.type}, ${p.width}m): ${checkPath(p).label}`));
     if (insight) {
       lines.push("", "KEY FINDINGS");
-      (insight.key_findings || []).forEach((f) => lines.push(`  - ${f}`));
+      keyFindings().forEach((f) => lines.push(`  - ${f}`));
       lines.push("", "CONSTRAINTS FOR CONCEPT GENERATOR");
       (insight.constraints || []).forEach((f) => lines.push(`  - ${f}`));
-      lines.push("", "CONCLUSION", insight.conclusion || "");
+      lines.push("", "CONCLUSION", overallConclusion());
     }
     return lines.join("\n");
   }
@@ -263,27 +263,27 @@ export default function SiteContextAnalyzer() {
           headers: ["Element", "Type", "Width (m)", "Result"],
           rows: namedPaths.map((p) => [p.name, p.type, p.width || "-", checkPath(p).label]),
         });
-        if ((insight?.key_findings || []).length) F.push({ title: "Key findings", items: insight.key_findings });
-        if ((insight?.constraints || []).length) F.push({ title: "Constraints for the concept generator", items: insight.constraints });
+        if (keyFindings().length) F.push({ title: "Key findings", items: keyFindings() });
+        if (forwardConstraints().length) F.push({ title: "Constraints for the concept generator", items: forwardConstraints() });
         return F.length ? F : [{ title: "Analysis output", text: buildReportText() }];
       })(),
-      chartNote: (zones.filter((z) => z.name.trim()).length || (insight?.adjacencies || []).length)
+      chartNote: (zones.filter((z) => z.name.trim()).length || adjacencies().length)
         ? "Adjacency map, zone capacity chart and accessibility check table are reproduced in the PDF export."
         : "No charts - add zones or run the analysis first.",
       chartsHtml:
-        ((insight?.adjacencies || []).length
+        (adjacencies().length
           ? tableHTML(["Direction", "Adjacent land use", "Demand implication", "Design response"],
-              insight.adjacencies.map((a) => [a.direction, a.land_use, a.demand_implication, a.design_response]),
+              adjacencies().map((a) => [a.direction, a.land_use, a.demand_implication, a.design_response]),
               "Adjacent land use by edge")
           : "") +
-        ((insight?.hazard_screening || []).length
+        (hazards().length
           ? tableHTML(["Hazard", "Likelihood", "Basis", "Design implication"],
-              insight.hazard_screening.map((hz) => [hz.hazard, hz.likelihood, hz.basis, hz.design_implication]),
+              hazards().map((hz) => [hz.hazard, hz.likelihood, hz.basis, hz.design_implication]),
               "Preliminary hazard screening (desk study - prompts professional assessment)")
           : "") +
-        ((insight?.quiet_and_active_zoning || []).length
+        (zoning().length
           ? tableHTML(["Edge", "Suggested character", "Reason"],
-              insight.quiet_and_active_zoning.map((q) => [q.edge, q.suggested_character, q.reason]),
+              zoning().map((q) => [q.edge, q.suggested_character, q.reason]),
               "Suggested edge character")
           : "") +
         (zones.filter((z) => z.name.trim()).length
@@ -292,8 +292,8 @@ export default function SiteContextAnalyzer() {
               return { label: z.name, value: c.high, display: `${c.low}-${c.high} people` };
             }), { title: "Indicative peak capacity by zone" })
           : ""),
-      interpretation: insight?.conclusion || "",
-      conclusions: [...(insight?.key_findings || []), ...(insight?.constraints || [])].filter(Boolean),
+      interpretation: overallConclusion(),
+      conclusions: [...keyFindings(), ...forwardConstraints()].filter(Boolean),
       runLimitations: [],
       extraRefs: webSources,
       overflow: overflowText,
@@ -311,6 +311,34 @@ export default function SiteContextAnalyzer() {
   function exportExcel() { withOverflow((o) => exportStructuredExcel(o, XLSX)); }
 
   function exportWord() { withOverflow((o) => exportStructuredWord(o)); }
+
+
+
+  // These four come from the RESEARCH call (context), not the insight call. Reading
+  // them off `insight` returned undefined - which is why chartsHtml was always empty
+  // and "no chartable data" appeared even on a run with eight populated edges.
+  const adjacencies = () => context?.adjacencies || insight?.adjacencies || [];
+  const hazards = () => context?.hazard_screening || insight?.hazard_screening || [];
+  const zoning = () => context?.quiet_and_active_zoning || insight?.quiet_and_active_zoning || [];
+  const accessStandards = () => context?.accessibility_standards || insight?.accessibility_standards || [];
+
+  // ── Field reconciliation ────────────────────────────────────────────────
+  // Two AI calls populate this tool and they use DIFFERENT key names:
+  //   research (context) returns  key_findings / constraints / conclusion
+  //   insight            returns  findings / forward_constraints / conclusion
+  // The report previously read insight.key_findings and insight.constraints -
+  // names neither call produces - so section 10 was always empty and the on-screen
+  // findings list was always blank, no matter how good the model's answer was.
+  // Read both shapes, from both objects, in one place.
+  const keyFindings = () =>
+    (insight?.findings?.length && insight.findings) ||
+    (insight?.key_findings?.length && insight.key_findings) ||
+    (context?.key_findings?.length && context.key_findings) || [];
+  const forwardConstraints = () =>
+    (insight?.forward_constraints?.length && insight.forward_constraints) ||
+    (insight?.constraints?.length && insight.constraints) ||
+    (context?.constraints?.length && context.constraints) || [];
+  const overallConclusion = () => insight?.conclusion || context?.conclusion || "";
 
   function exportPDF() {
     setPdfError("");
@@ -433,12 +461,12 @@ export default function SiteContextAnalyzer() {
           {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(insightError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-5">Technical: {insightError}</p></div>)}
           {insight && (
             <div className="space-y-3">
-              <div className="space-y-1">{(insight.key_findings || []).map((f, i) => (<p key={i} className="text-sm text-[#3A362C]">- {f}</p>))}</div>
+              <div className="space-y-1">{keyFindings().map((f, i) => (<p key={i} className="text-sm text-[#3A362C]">- {f}</p>))}</div>
 
-              {insight.adjacencies?.length > 0 && (
+              {adjacencies()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
                   <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Adjacent land use by edge</p>
-                  {insight.adjacencies.map((a, i) => (
+                  {adjacencies().map((a, i) => (
                     <p key={i} className="text-xs text-[#5A5445] mb-1">
                       <span className="font-semibold">{a.direction}:</span> {a.land_use} - {a.demand_implication} <span className="text-brand-success">{a.design_response}</span>
                     </p>
@@ -446,20 +474,20 @@ export default function SiteContextAnalyzer() {
                 </div>
               )}
 
-              {insight.quiet_and_active_zoning?.length > 0 && (
+              {zoning()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
                   <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Suggested edge character</p>
-                  {insight.quiet_and_active_zoning.map((q, i) => (
+                  {zoning().map((q, i) => (
                     <p key={i} className="text-xs text-[#5A5445]"><span className="font-semibold">{q.edge}:</span> {q.suggested_character} - {q.reason}</p>
                   ))}
                 </div>
               )}
 
-              {insight.hazard_screening?.length > 0 && (
+              {hazards()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
                   <p className="text-xs font-semibold text-[#B84C3D] uppercase tracking-wide mb-1">Preliminary hazard screening</p>
                   <p className="text-[10px] text-[#8A8474] mb-1">Desk screening only - prompts professional assessment, it is not a hazard assessment.</p>
-                  {insight.hazard_screening.map((hz, i) => (
+                  {hazards().map((hz, i) => (
                     <p key={i} className="text-xs text-[#5A5445]">
                       <span className="font-semibold">{hz.hazard}</span> ({hz.likelihood}): {hz.basis} - {hz.design_implication}
                     </p>
@@ -467,10 +495,10 @@ export default function SiteContextAnalyzer() {
                 </div>
               )}
 
-              {insight.accessibility_standards?.length > 0 && (
+              {accessStandards()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
                   <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Accessibility standards applied</p>
-                  {insight.accessibility_standards.map((a, i) => (
+                  {accessStandards().map((a, i) => (
                     <p key={i} className="text-xs text-[#5A5445]"><span className="font-semibold">{a.requirement}:</span> {a.value} <span className="text-[10px]">({a.source})</span></p>
                   ))}
                 </div>
@@ -482,7 +510,7 @@ export default function SiteContextAnalyzer() {
           {!insight && !insightLoading && !insightError && <p className="text-sm text-[#8A8474]">Analyze site context above (Step 1), fill in zones/paths, then generate a synthesis.</p>}
         </div>
 
-        {insight?.conclusion && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2><p className="text-sm text-[#3A362C] leading-relaxed font-medium">{insight.conclusion}</p></div>)}
+        {overallConclusion() && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2><p className="text-sm text-[#3A362C] leading-relaxed font-medium">{overallConclusion()}</p></div>)}
 
         <ReportPreview
 

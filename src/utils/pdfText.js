@@ -42,7 +42,11 @@ async function getPdfjs() {
 export async function extractPdfText(file, onProgress) {
   const pdfjs = await getPdfjs();
   const buf = await file.arrayBuffer();
-  const doc = await pdfjs.getDocument({ data: buf, isEvalSupported: false, standardFontDataUrl: stdFontUrl }).promise;
+  // Keep the loading task: destroy() lives on the TASK, not the document proxy.
+  // Calling doc.destroy() threw "i.destroy is not a function" in the minified build,
+  // after extraction had already succeeded - so the text was pulled and then binned.
+  const loadingTask = pdfjs.getDocument({ data: buf, isEvalSupported: false, standardFontDataUrl: stdFontUrl });
+  const doc = await loadingTask.promise;
 
   const parts = [];
   for (let n = 1; n <= doc.numPages; n++) {
@@ -71,7 +75,8 @@ export async function extractPdfText(file, onProgress) {
 
   const text = parts.join("\n\n").trim();
   const pages = doc.numPages;
-  doc.destroy();
+  // Defensive: cleanup must never take down a successful extraction.
+  try { doc.cleanup?.(); await loadingTask.destroy?.(); } catch { /* extraction already succeeded */ }
 
   if (!text) {
     return {
