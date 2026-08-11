@@ -126,6 +126,9 @@ export default function SiteContextAnalyzer() {
       // Clearing it also prevents a previous location's insight persisting.
       setInsight(null);
       setInsightError("");
+      // Propose zones from the researched context, as the Solar tool does, so the
+      // capacity table and charts are populated on a first run. Fully editable.
+      if (siteArea && !zones.filter((z) => z.name.trim()).length) autoSuggestZones(parsed);
     } catch (e) {
       setContextError(e.message || "Something went wrong analysing the site. Try again.");
     } finally {
@@ -314,6 +317,37 @@ export default function SiteContextAnalyzer() {
 
 
 
+
+  // Mirrors the Solar tool: propose the zones a park of this size and context would
+  // contain, so capacity and charts work on a first run without the user having to
+  // hand-enter a zone schedule. Everything proposed stays fully editable.
+  const [autoZoneNote, setAutoZoneNote] = useState("");
+  const [autoZoneLoading, setAutoZoneLoading] = useState(false);
+  async function autoSuggestZones(ctxData) {
+    if (!siteArea) { setAutoZoneNote("Enter a site area first - zone areas are apportioned from it."); return; }
+    setAutoZoneLoading(true); setAutoZoneNote("");
+    try {
+      const adj = (ctxData?.adjacencies || []).map((a) => `${a.direction}: ${a.land_use || "unknown"}`).join("; ");
+      const resText = await callAI({
+        provider, apiKey, model, maxTokens: 1200,
+        content:
+          `For a public park of ${siteArea} m2 at "${location || "the stated location"}", propose the functional zones such a park would typically contain. ` +
+          `Adjacent land uses by edge: ${adj || "not established"}. ` +
+          "Apportion areas so they sum to approximately the total site area. Respond with ONLY valid JSON, no markdown fences: " +
+          '{"zones":[{"name":"","area":0}]}',
+      });
+      const parsed = extractJSON(resText);
+      const proposed = (parsed?.zones || []).filter((z) => z?.name).map((z) => ({
+        id: uid("zone"), name: String(z.name), area: String(Math.round(Number(z.area) || 0)),
+      }));
+      if (!proposed.length) throw new Error("No zones were proposed. Add them manually below.");
+      setZones((prev) => [...prev.filter((z) => z.name.trim()), ...proposed]);
+      setAutoZoneNote(`${proposed.length} zones proposed from the site context. Edit or delete any of them - they are a starting point, not a decision.`);
+    } catch (err) {
+      setAutoZoneNote(friendlyError(err.message) || "Could not propose zones. Add them manually below.");
+    } finally { setAutoZoneLoading(false); }
+  }
+
   // These four come from the RESEARCH call (context), not the insight call. Reading
   // them off `insight` returned undefined - which is why chartsHtml was always empty
   // and "no chartable data" appeared even on a run with eight populated edges.
@@ -392,7 +426,7 @@ export default function SiteContextAnalyzer() {
           <>
             <div className="bg-white rounded-lg border border-[#E8E2D5] overflow-hidden">
               <div className="px-4 py-3 border-b border-[#E8E2D5]"><h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445]">Adjacent Land-Use & Urban Fabric</h2></div>
-              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-[#8A8474] text-xs uppercase tracking-wide border-b border-[#E8E2D5]"><th className="px-4 py-2">Direction</th><th className="px-4 py-2">Adjacent Use</th><th className="px-4 py-2">Design Implication</th></tr></thead><tbody>{(context.adjacencies || []).map((a, i) => (<tr key={i} className="border-b border-[#F0EBDF]"><td className="px-4 py-2 font-medium">{a.direction}</td><td className="px-4 py-2">{a.use}</td><td className="px-4 py-2 text-[#5A5445] text-xs">{a.implication}</td></tr>))}</tbody></table></div>
+              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-[#8A8474] text-xs uppercase tracking-wide border-b border-[#E8E2D5]"><th className="px-4 py-2">Direction</th><th className="px-4 py-2">Adjacent Use</th><th className="px-4 py-2">Design Implication</th></tr></thead><tbody>{adjacencies().map((a, i) => (<tr key={i} className="border-b border-[#F0EBDF]"><td className="px-4 py-2 font-medium">{a.direction}</td><td className="px-4 py-2">{a.land_use || a.use || <span className="text-[#B8863B]">Not determined</span>}</td><td className="px-4 py-2 text-[#5A5445] text-xs">{a.demand_implication || a.implication || "—"}</td></tr>))}</tbody></table></div>
             </div>
 
             <div className="bg-white rounded-lg border border-[#E8E2D5] overflow-hidden">
@@ -412,6 +446,13 @@ export default function SiteContextAnalyzer() {
               </p>
             </div>
             <button onClick={addZone} style={BTN_GOLD} className="text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1"><Plus size={13} /> Add zone</button>
+          </div>
+          {(autoZoneLoading || autoZoneNote) && (
+            <p className="text-[10px] mb-2 flex items-start gap-1" style={{ color: autoZoneLoading ? "#8A8474" : "#3D7A5C" }}>
+              <Info size={10} className="mt-0.5 flex-shrink-0" /> {autoZoneLoading ? "Proposing zones from the site context..." : autoZoneNote}
+            </p>
+          )}
+          <div className="hidden">
           </div>
           <div className="p-4 space-y-2">
             {zones.map((z) => { const c = capacityRange(z.area); return (<div key={z.id} className="flex items-center gap-2 text-sm"><input value={z.name} onChange={(e) => updateZone(z.id, { name: e.target.value })} placeholder="Zone name" className="flex-1 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-2 py-1.5 focus:border-[#C9A46A] outline-none" /><input type="number" value={z.area} onChange={(e) => updateZone(z.id, { area: e.target.value })} placeholder="Area m2" className="w-24 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-2 py-1.5 font-mono focus:border-[#C9A46A] outline-none" /><span className="w-32 text-xs font-mono text-[#8A6A3A] text-right">{z.area ? `${c.low}-${c.high} visitors` : "--"}</span><button onClick={() => removeZone(z.id)} className="text-[#B8A98F] hover:text-[#B84C3D]"><Trash2 size={14} /></button></div>); })}

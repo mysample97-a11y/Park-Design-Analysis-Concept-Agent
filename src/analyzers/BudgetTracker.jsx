@@ -7,6 +7,9 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, formatNumber, stripRTF } from "../utils/helpers";
+// Same accept list as the other consumer tools, so a report exported anywhere in
+// this suite can be fed straight in without the user converting it first.
+import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
 
@@ -141,21 +144,11 @@ export default function BudgetTracker() {
     if (!file) return;
     setDetectError("");
     try {
-      const name = (file.name || "").toLowerCase();
-      let text = "";
-      if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-        text = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
-      } else if (name.endsWith(".docx")) {
-        const mammoth = await import("mammoth");
-        text = (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
-      } else if (name.endsWith(".rtf")) {
-        text = stripRTF(await file.text());
-      } else if (name.endsWith(".txt") || name.endsWith(".csv")) {
-        text = await file.text();
-      } else {
-        throw new Error("Unsupported file. Use .xlsx, .csv, .docx, .rtf or .txt - or paste the text instead.");
-      }
+      // Shared reader. The old code read only the FIRST sheet of a workbook - but the
+      // reports this suite exports carry eleven sheets, so the facility schedule was
+      // silently missed. It also could not read PDF at all.
+      const res = await readExportFile(file);
+      const text = res.text;
       setPasteText((prev) => (prev ? prev + "\n\n" : "") + text);
     } catch (err) {
       setDetectError(err.message || "Could not read this file.");
@@ -313,7 +306,7 @@ export default function BudgetTracker() {
           <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Paste a concept's facility schedule (the Concept Generator now lists facilities per zone with areas), or a program description..." rows={4} className="textarea" />
           <label className="text-[11px] font-medium text-brand-gold flex items-center gap-1 cursor-pointer hover:underline w-fit">
             <Plus size={12} /> Upload facility list (.xlsx, .csv, .docx, .rtf, .txt)
-            <input type="file" accept=".xlsx,.xls,.csv,.docx,.rtf,.txt" onChange={handleFacilityFile} className="sr-only" />
+            <input type="file" accept={EXPORT_ACCEPT} onChange={handleFacilityFile} className="sr-only" />
           </label>
           <button onClick={autoDetect} disabled={detecting || !apiKey} className="btn-gold w-full"><Sparkles size={16} /> {detecting ? "Detecting..." : "Auto-Detect Facilities"}</button>
           {detectError && (<div className="space-y-1"><p className="text-xs text-brand-dark flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(detectError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-4">Technical: {detectError}</p></div>)}

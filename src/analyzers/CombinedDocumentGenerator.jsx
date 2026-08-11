@@ -8,7 +8,7 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF, fileToBase64Raw, copyToClipboard } from "../utils/helpers";
-import { extractPdfText } from "../utils/pdfText";
+import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
 
@@ -63,31 +63,15 @@ export default function CombinedDocumentGenerator() {
         extracted = res.value;
       } else if (name.endsWith(".rtf")) {
         extracted = stripRTF(await file.text());
-      } else if (name.endsWith(".pdf")) {
-        // Extract locally with pdf.js. This is deterministic, costs nothing, needs no
-        // API key, and works on EVERY provider. It previously required Claude's native
-        // document endpoint, which made the tool unusable on the Gemini free tier.
-        const res = await extractPdfText(file, (p, total) =>
+      } else if (/\.(pdf|xlsx|xls|csv|md|json)$/.test(name)) {
+        // Shared reader: spreadsheets, PDFs and plain formats all read locally in
+        // the browser. .xlsx used to be rejected here even though it is what every
+        // analysis tool exports, which forced the user to copy-paste by hand.
+        const res = await readExportFile(file, (p, total) =>
           setFileErrors((fe) => ({ ...fe, [sectionId]: `Reading page ${p} of ${total}...` })));
         setFileErrors((fe) => ({ ...fe, [sectionId]: "" }));
-        if (res.empty) {
-          // A scanned PDF has no text layer. Offer the AI route as a fallback where the
-          // provider supports it, rather than failing outright - but say what happened.
-          if (provider === "claude" && apiKey) {
-            const base64 = await fileToBase64Raw(file);
-            extracted = await callAI({
-              provider, apiKey, maxTokens: 3000, pdfBase64: base64,
-              content: "Extract the full plain text of this document, preserving structure. Respond with ONLY the extracted text.",
-            });
-            if (!extracted) throw new Error(res.note);
-            setPdfNotes((n) => ({ ...n, [sectionId]: "No text layer found, so this scanned PDF was read by AI instead. Check the result against the original." }));
-          } else {
-            throw new Error(res.note);
-          }
-        } else {
-          extracted = res.text;
-          setPdfNotes((n) => ({ ...n, [sectionId]: res.note + " Read locally in your browser - no AI, no API key used." }));
-        }
+        extracted = res.text;
+        setPdfNotes((n) => ({ ...n, [sectionId]: res.note }));
       } else if (name.endsWith(".doc")) {
         throw new Error("Old .doc format isn't supported - save as .docx, or paste the text.");
       } else {
@@ -294,7 +278,7 @@ export default function CombinedDocumentGenerator() {
 
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts .txt, .docx, .rtf and .pdf. PDFs are read locally in your browser - all providers, no API key needed.</p>
+        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed.</p>
       </div>
 
       <div className="card">
@@ -313,7 +297,7 @@ export default function CombinedDocumentGenerator() {
                 )}
                 <label className="text-[10px] font-medium text-brand-gold flex items-center gap-1 cursor-pointer hover:underline">
                   <Upload size={11} /> {fileLoading[s.id] ? "Reading..." : "Upload file"}
-                  <input type="file" accept=".txt,.docx,.rtf,.pdf" onChange={(e) => { handleSectionFile(s.id, e.target.files[0]); e.target.value = ""; }} className="sr-only" />
+                  <input type="file" accept={EXPORT_ACCEPT} onChange={(e) => { handleSectionFile(s.id, e.target.files[0]); e.target.value = ""; }} className="sr-only" />
                 </label>
                 </span>
               </div>

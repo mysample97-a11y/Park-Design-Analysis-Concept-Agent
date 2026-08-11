@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sparkles, AlertTriangle, Layers } from "lucide-react";
+import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { checklistPrompt } from "../utils/methodology";
@@ -7,6 +7,7 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML } from "../utils/helpers";
+import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
 
@@ -52,6 +53,22 @@ function BubbleDiagram({ zones }) {
 export default function ConceptGenerator() {
   const { provider, apiKey, meta } = useAppContext();
   const [brief, setBrief] = useState("");
+  // File ingestion. This tool previously accepted pasted text ONLY, so a user had to
+  // open an exported report, select all, copy and paste it in by hand - for every run.
+  const [briefFileNote, setBriefFileNote] = useState("");
+  const [briefFileError, setBriefFileError] = useState("");
+  async function handleBriefFile(file) {
+    if (!file) return;
+    setBriefFileError(""); setBriefFileNote("Reading file...");
+    try {
+      const res = await readExportFile(file, (p, total) => setBriefFileNote(`Reading page ${p} of ${total}...`));
+      // Append rather than overwrite, so several tool exports can be combined.
+      setBrief((prev) => (prev ? prev.trim() + "\n\n" : "") + `--- ${file.name} ---\n` + res.text);
+      setBriefFileNote(`${file.name}: ${res.note}`);
+    } catch (err) {
+      setBriefFileNote(""); setBriefFileError(err.message || "Could not read that file.");
+    }
+  }
   const [userIdeas, setUserIdeas] = useState("");
   const [siteAreaM2, setSiteAreaM2] = useState("");
   const [siteContext, setSiteContext] = useState({ N: "", E: "", S: "", W: "" });
@@ -247,7 +264,17 @@ export default function ConceptGenerator() {
       <div className="card">
         <div className="card-header">Step 1 - Site Findings & Program Brief</div>
         <div className="p-4 space-y-3">
-          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Paste your key site analysis findings (adjacencies, sun/wind exposure, survey themes, accessibility constraints) and the required program/facility list here..." rows={9} className="textarea" />
+          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Paste your key site analysis findings, or upload the reports exported by the analysis tools below..." rows={9} className="textarea" />
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <label className="text-xs font-semibold px-3 py-2 rounded-md border border-[#DDD6C9] cursor-pointer flex items-center gap-1 hover:border-[#C9A46A]">
+              <Upload size={12} /> Upload analysis report
+              <input type="file" accept={EXPORT_ACCEPT} onChange={(e) => { handleBriefFile(e.target.files[0]); e.target.value = ""; }} className="sr-only" />
+            </label>
+            {brief && <button onClick={() => { setBrief(""); setBriefFileNote(""); }} className="text-xs text-brand-danger underline">Clear brief</button>}
+          </div>
+          <p className="text-[10px] text-brand-muted mt-1">Accepts any report exported by this suite (.xlsx, .rtf, .pdf) plus .docx, .txt, .csv. Upload several to combine them. Read locally - no AI, no API key.</p>
+          {briefFileNote && <p className="text-[10px] text-brand-success mt-1">{briefFileNote}</p>}
+          {briefFileError && <p className="text-[10px] text-brand-danger mt-1 flex items-center gap-1"><AlertTriangle size={10} /> {briefFileError}</p>}
           <div className="border border-brand-border rounded-lg p-3 space-y-2">
             <label className="text-xs font-semibold text-brand-text uppercase tracking-wide">Project location - research local practice (recommended)</label>
             <p className="text-[10px] text-brand-text/60">
