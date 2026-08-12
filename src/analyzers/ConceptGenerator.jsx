@@ -102,6 +102,7 @@ export default function ConceptGenerator() {
   const [recommendation, setRecommendation] = useState(null);
   const [recLoading, setRecLoading] = useState(false);
   const [recError, setRecError] = useState("");
+  const [progress, setProgress] = useState("");
 
   const [locationCtx, setLocationCtx] = useState("");
   const [ctxLoading, setCtxLoading] = useState(false);
@@ -139,20 +140,85 @@ export default function ConceptGenerator() {
 
   async function generateConcepts() {
     if (!brief.trim()) { setError("Paste your site analysis findings and program requirements above first."); return; }
-    setLoading(true); setError(""); setConcepts(null); setRecommendation(null);
+    // Keep any concepts already generated and top up the missing ones. The old
+    // code cleared them, which contradicted the "press Generate again for the
+    // rest" message it showed after a partial run - pressing again discarded the
+    // concepts the user had just paid for.
+    const existing = (concepts || []).slice();
+    setLoading(true); setError(""); setRecommendation(null);
     try {
-      const text = await callAI({
-        provider, apiKey, maxTokens: 6000,
-        content:
-          `You are a landscape architecture concept-design assistant. Given the site analysis findings and program brief below, generate ${numConcepts} DISTINCT zoning concept variants for a park redesign. Each concept should meaningfully differ in spatial organization, not just wording. ` +
-          "CRITICAL: every facility must have a numeric area_m2. A facility list without areas is unusable downstream. " +
-          "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point), facilities (array of {name, area_m2} objects naming the BUILT facilities in that zone, e.g. {\"name\":\"shade pergola\",\"area_m2\":400} - be concrete and complete, and the facility areas within a zone must sum to approximately that zone's own area. EVERY facility MUST carry a positive area_m2: these feed a cost estimate directly and a facility without an area cannot be costed)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
-          "Every zone rationale MUST reference something specific from the brief - no generic rationale. " +
-          `Respond with ONLY a valid JSON array of ${numConcepts} concept objects, no markdown fences.` + checklistPrompt("CPT") + (locationCtx ? `\n\nRESEARCHED LOCAL CONTEXT for ${projectLocation} - use this so concepts respond to real local practice, and say in a zone rationale where a concept follows or deliberately departs from it:\n${locationCtx}` : "") + `\n\nSITE ANALYSIS & PROGRAM BRIEF:\n${brief}`,
-      });
-      const parsed = extractJSON(text);
-      if (!Array.isArray(parsed)) throw new Error("Expected a list of concepts but got something else. Try again.");
-      setConcepts(parsed);
+      // Generate ONE concept per call.
+      //
+      // A single call for all three overflowed the reply. Zones plus a facility
+      // schedule with an area on every line is roughly 700-900 tokens per
+      // concept, so three concepts plus research context exceeded the ceiling:
+      // concept 2 arrived with zones and facilities but no scores, and concept 3
+      // was never written at all. Note the failure mode - `scores` sat AFTER the
+      // long arrays in the schema, so truncation removed the scores first, which
+      // is why an otherwise complete concept showed 0.0.
+      const built = existing.slice();
+      const failed = [];
+      if (built.length >= numConcepts) {
+        setProgress("");
+        setError(`${built.length} concepts already generated. Increase the count above, or press "Clear concepts and start again".`);
+        setLoading(false);
+        return;
+      }
+      for (let ci = built.length + 1; ci <= numConcepts; ci++) {
+        setProgress(`Generating concept ${ci} of ${numConcepts}${existing.length ? " (keeping " + existing.length + " already generated)" : ""}...`);
+        const prior = built.map((c) => c.name).filter(Boolean);
+        const text = await callAI({
+          provider, apiKey, maxTokens: 4000,
+          content:
+            "You are a landscape architecture concept-design assistant. Given the site analysis findings and " +
+            `program brief below, generate ONE zoning concept variant for a park redesign (concept ${ci} of ${numConcepts}). ` +
+            (prior.length
+              ? `It MUST differ meaningfully in spatial organisation from the concepts already generated: ${prior.join("; ")}. Do not restate them with different wording. `
+              : "") +
+            "Put the SUMMARY FIELDS FIRST so they survive any truncation. Respond with ONLY a valid JSON object, " +
+            "no markdown fences, in exactly this order:\n" +
+            '{"name":"short, evocative",' +
+            '"scores":{"innovation":0,"human_centered":0,"design_ux":0,"feasibility":0},' +
+            '"vision":"1-2 sentence design narrative",' +
+            '"organising_idea":"what makes this structurally different from the alternatives",' +
+            '"strengths":[""],"weaknesses":[""],' +
+            '"zones":[{"name":"","category":"","area_pct":0,"position":"N|NE|E|SE|S|SW|W|NW|Center",' +
+            '"rationale":"one sentence citing a SPECIFIC data point from the brief",' +
+            '"facilities":[{"name":"","area_m2":0}]}]}\n' +
+            "Each score is 1-10 as your honest judgment. Zone area_pct values must sum to approximately 100. " +
+            "EVERY facility must carry a positive area_m2, and the facility areas within a zone must sum to " +
+            "approximately that zone's area - these feed a cost estimate and a facility without an area cannot be costed. " +
+            "Every zone rationale must reference something specific from the brief; generic rationale is not acceptable. " +
+            checklistPrompt("CPT") +
+            (locationCtx
+              ? `\n\nRESEARCHED LOCAL CONTEXT for ${projectLocation} - use this so the concept responds to real local practice, and say in a zone rationale where it follows or deliberately departs from it:\n${locationCtx}`
+              : "") +
+            `\n\nSITE ANALYSIS & PROGRAM BRIEF:\n${brief}`,
+        });
+        const p = extractJSON(text);
+        // A concept without scores or zones is not a concept. Report it rather
+        // than rendering a row of dashes with an overall score of 0.0.
+        const hasScores = p && p.scores && ["innovation", "human_centered", "design_ux", "feasibility"]
+          .some((k) => Number(p.scores[k]) > 0);
+        if (p && p.name && hasScores && (p.zones || []).length) {
+          built.push(p);
+        } else {
+          const why = !p ? "reply could not be read"
+            : !hasScores ? "no scores returned"
+            : !(p.zones || []).length ? "no zones returned"
+            : "incomplete";
+          failed.push(`Concept ${ci} (${why})`);
+        }
+      }
+      setProgress("");
+      if (!built.length) throw new Error(
+        "No complete concept could be generated: " + failed.join("; ") +
+        ". Shorten the brief and try again.");
+      if (failed.length) setError(
+        `Generated ${built.length} of ${numConcepts} concepts. Not generated: ${failed.join("; ")}. ` +
+        "Press Generate again - the concepts already produced are kept and only the missing ones are re-attempted. " +
+        "If it fails repeatedly, shorten the brief or check your API quota.");
+      setConcepts(built);
     } catch (e) {
       setError(e.message || "Something went wrong generating concepts. Try again.");
     } finally {
@@ -392,7 +458,25 @@ export default function ConceptGenerator() {
             <label className="text-sm text-brand-text">Number of concepts:</label>
             <select value={numConcepts} onChange={(e) => setNumConcepts(Number(e.target.value))} className="text-sm bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5"><option value={3}>3</option><option value={4}>4</option></select>
           </div>
-          <button onClick={generateConcepts} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Generating concepts..." : "Generate Concepts"}</button>
+          {(concepts || []).length > 0 && (
+            <button
+              onClick={() => { setConcepts(null); setRecommendation(null); setError(""); setProgress(""); }}
+              className="text-xs text-brand-danger underline mb-2">
+              Clear concepts and start again
+            </button>
+          )}
+          <button onClick={generateConcepts} disabled={loading || !apiKey} className="btn-gold w-full disabled:opacity-60">
+            {loading
+              ? <span className="inline-block w-[18px] h-[18px] border-2 border-brand-dark/30 border-t-brand-dark rounded-full animate-spin" />
+              : <Sparkles size={18} />}
+            {loading ? (progress || "Generating concepts...") : "Generate Concepts"}
+          </button>
+          {loading && (
+            <p className="text-[11px] text-brand-text mt-1">
+              Each concept is generated in its own call so a long facility schedule cannot truncate the next one.
+              {numConcepts > 1 ? ` ${numConcepts} calls, plus research - this takes a minute.` : ""}
+            </p>
+          )}
           {loading && <p className="text-xs text-brand-text">This can take a moment - generating multiple distinct, scored concepts at once.</p>}
           {error && (<div className="space-y-1"><p className="text-xs text-brand-dark flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(error)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-4">Technical: {error}</p></div>)}
         </div>
