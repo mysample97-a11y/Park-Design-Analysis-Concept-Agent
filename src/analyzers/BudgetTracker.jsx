@@ -162,30 +162,67 @@ export default function BudgetTracker() {
       for (const x of filled) {
         setCompareError(`Costing concept ${x.i + 1} of ${filled.length}...`);
         const one = await callAI({
-          provider, apiKey, maxTokens: 2000, useWebSearch: true,
-          onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
-          content: "You are a cost consultant. Extract every facility and area from this ONE park concept, apply indicative construction unit rates for the stated location, and build an order-of-cost estimate using the RICS NRM1 cascade (measured works, then preliminaries, overheads and profit, contingency, inflation). " +
-            "Return ONLY valid JSON, no markdown fences: {" +
-            "\"name\":\"the concept name\"," +
-            "\"facilities\":[{\"facility\":\"\",\"area_m2\":0,\"rate_per_m2\":0,\"subtotal\":0}]," +
-            "\"construction_subtotal\":0,\"preliminaries\":0,\"ohp\":0,\"contingency\":0,\"inflation\":0," +
-            "\"estimated_capex\":0,\"annual_opex\":0," +
-            "\"largest_cost_driver\":\"the single facility contributing most\",\"driver_share_pct\":0," +
-            "\"within_budget\":true,\"confidence\":\"Verified-Macro|Verified-Adjacent-Scale|Assumption-Flagged\"," +
-            "\"bottlenecks\":[\"cost or delivery risks specific to this concept\"]," +
-            "\"opportunities\":[\"what could be added or improved if budget allows\"]}. " +
-            "Mark any rate you could not source against a published benchmark as Assumption-Flagged.\n\n" +
-            `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\n${x.label}:\n${x.t}`,
+          // Web search OFF for the per-concept calls. Rates are researched once,
+          // in the main estimate; repeating the search for every concept spent the
+          // token budget on search results and left nothing for the reply.
+          provider, apiKey, maxTokens: 2000,
+          content:
+            "You are a cost consultant. Extract every facility from this ONE park concept with its area and an " +
+            "indicative construction unit rate for the stated location. Do NOT compute totals - they are calculated " +
+            "separately. Return ONLY valid JSON, no markdown fences, with the SUMMARY FIELDS FIRST:\n" +
+            '{"name":"the concept name",' +
+            '"largest_cost_driver":"the single facility contributing most",' +
+            '"confidence":"Verified-Macro|Verified-Adjacent-Scale|Assumption-Flagged",' +
+            '"bottlenecks":["cost or delivery risks specific to this concept"],' +
+            '"opportunities":["what could be added or improved if budget allows"],' +
+            '"facilities":[{"facility":"","area_m2":0,"rate_per_m2":0}]}\n' +
+            "Every facility must carry a positive area_m2 and rate_per_m2. Mark any rate you could not source " +
+            "against a published benchmark as Assumption-Flagged.\n\n" +
+            `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\n\n${x.label}:\n${x.t}`,
         });
-        const p = extractJSON(one);
-        // A reply carrying a name but no numeric CAPEX is NOT a costing. The old
-        // guard accepted it, which is how a comparison table of "N/A" cells was
-        // presented as a completed cost comparison.
-        const capex = Number(p && p.estimated_capex);
-        if (p && capex > 0) {
-          costed.push({ ...p, name: p.name || x.label });
+        const p = extractJSON(one) || {};
+
+        // Compute the NRM1 cascade HERE, deterministically, from the same
+        // percentages used in section 6.2 - rather than asking the model for it.
+        //
+        // The previous version put estimated_capex AFTER the facilities array in
+        // the requested schema. A long facilities list truncated the reply before
+        // the totals were ever written, so every concept came back with no usable
+        // figure. Beyond robustness, this is simply the correct division of work:
+        // the cascade is arithmetic, and this report claims it as deterministic.
+        const facs = (p.facilities || [])
+          .map((x2) => ({
+            facility: String(x2.facility || "").trim(),
+            area_m2: Number(x2.area_m2) || 0,
+            rate_per_m2: Number(x2.rate_per_m2) || 0,
+          }))
+          .filter((x2) => x2.facility && x2.area_m2 > 0 && x2.rate_per_m2 > 0);
+        facs.forEach((x2) => { x2.subtotal = x2.area_m2 * x2.rate_per_m2; });
+
+        const construction = facs.reduce((a, x2) => a + x2.subtotal, 0);
+        if (construction > 0) {
+          const prelim = construction * (Number(rates.preliminaries) || 0) / 100;
+          const ohp = (construction + prelim) * (Number(rates.ohp) || 0) / 100;
+          const cont = (construction + prelim + ohp) * (Number(rates.contingency) || 0) / 100;
+          const infl = (construction + prelim + ohp + cont) * (Number(rates.inflation) || 0) / 100;
+          const capex = construction + prelim + ohp + cont + infl;
+          const opex = capex * (Number(rates.opex) || 0) / 100;
+          const cap = Number(budgetCap) || 0;
+          const driver = facs.slice().sort((a, b) => b.subtotal - a.subtotal)[0];
+          costed.push({
+            ...p,
+            name: p.name || x.label,
+            facilities: facs,
+            construction_subtotal: construction,
+            preliminaries: prelim, ohp: ohp, contingency: cont, inflation: infl,
+            estimated_capex: capex, annual_opex: opex,
+            largest_cost_driver: p.largest_cost_driver || (driver ? driver.facility : ""),
+            driver_share_pct: driver ? Math.round((driver.subtotal / construction) * 100) : 0,
+            within_budget: cap ? capex <= cap : null,
+            total_area_m2: facs.reduce((a, x2) => a + x2.area_m2, 0),
+          });
         } else {
-          rejected.push(x.label + (p && p.name ? " (" + p.name + ")" : "") + " - no usable cost figure returned");
+          rejected.push(x.label + " - no facilities with both an area and a rate were returned");
         }
       }
       if (!costed.length) throw new Error(
@@ -449,7 +486,7 @@ export default function BudgetTracker() {
             })()
           : []),
         ...(comparison ? [{ title: "Concept cost comparison - full cascade per concept",
-          note: "Each concept was costed separately using the same RICS NRM1 cascade, then compared on value for money rather than lowest cost.",
+          note: "Each concept was costed separately using the same RICS NRM1 cascade and the same wrapper percentages as section 6.2. The cascade is computed deterministically from facility areas and rates - only the facility schedule and unit rates are AI-derived. Concepts are compared on value for money rather than lowest cost.",
           headers: ["Concept", "Construction", "Prelims", "OH&P", "Contingency", "Inflation", `CAPEX ${currency}`, "Annual OPEX"],
           rows: (comparison.concepts || []).map((c) => [
             c.name, formatNumber(c.construction_subtotal), formatNumber(c.preliminaries), formatNumber(c.ohp),
