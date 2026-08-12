@@ -82,6 +82,7 @@ export default function BudgetTracker() {
   // it once; the tool splits the single input rather than asking for separate boxes.
   // "auto" lets the splitter decide from the document's own concept headings.
   const [conceptCount, setConceptCount] = useState("auto");
+  const [compareWarning, setCompareWarning] = useState("");
 
   /**
    * Split one pasted body into N concepts. Reports from the Concept Generator label
@@ -91,13 +92,37 @@ export default function BudgetTracker() {
   function splitConcepts(body) {
     const text = String(body || "").trim();
     if (!text) return [];
-    const re = /(?:^|\n)\s*(?:\d+\.\d+\s+)?CONCEPT\s+(\d+)\s*[:\-\u2014]/gi;
+    // Concept boundaries appear in TWO forms across this suite's own exports and
+    // the previous version only recognised the first:
+    //   (a) "6.2 CONCEPT 1: THE SOLAR CANOPY HUB"   - the RTF / section 6 form
+    //   (b) "The Solar Canopy Hub - zone schedule"  - the PDF visualisation form
+    // A user pasting from the PDF got ONE concept containing all three, so all
+    // three were costed in a single call against a single-concept schema. The
+    // model returned one name and no numbers - which is exactly how report
+    // AS2P-BDG-003-P01 came to recommend Concept 3 while costing Concept 1.
     const marks = [];
+    const reNum = /(?:^|\n)\s*(?:\d+\.\d+\s+)?CONCEPT\s+(\d+)\s*[:\-\u2014]/gi;
     let m;
-    while ((m = re.exec(text)) !== null) marks.push({ index: m.index, n: Number(m[1]) });
+    while ((m = reNum.exec(text)) !== null) marks.push({ index: m.index, label: "Concept " + m[1] });
+    if (marks.length < 2) {
+      // Form (b): a titled block followed by its own zone schedule.
+      marks.length = 0;
+      const reName = /(?:^|\n)\s*([A-Z][A-Za-z0-9&'’\- ]{4,60}?)\s*[-\u2013\u2014]\s*zone schedule/gi;
+      const seen = {};
+      while ((m = reName.exec(text)) !== null) {
+        const name = m[1].trim();
+        if (seen[name.toLowerCase()]) continue;
+        seen[name.toLowerCase()] = true;
+        // Anchor on the FIRST appearance of the name, which is the block heading,
+        // so the diagram and its schedule stay with the concept they belong to.
+        const first = text.toLowerCase().indexOf(name.toLowerCase());
+        marks.push({ index: first >= 0 ? first : m.index, label: name });
+      }
+      marks.sort(function (a, b) { return a.index - b.index; });
+    }
     if (marks.length >= 2) {
       return marks.map((mk, i) => ({
-        label: `Concept ${mk.n}`,
+        label: mk.label,
         text: text.slice(mk.index, i + 1 < marks.length ? marks[i + 1].index : text.length).trim(),
       }));
     }
@@ -133,6 +158,7 @@ export default function BudgetTracker() {
       // was cut mid-array, so `recommended` never arrived and the report printed
       // "Recommended: undefined" with only the first concept in the table.
       const costed = [];
+      const rejected = [];
       for (const x of filled) {
         setCompareError(`Costing concept ${x.i + 1} of ${filled.length}...`);
         const one = await callAI({
@@ -152,9 +178,27 @@ export default function BudgetTracker() {
             `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\n${x.label}:\n${x.t}`,
         });
         const p = extractJSON(one);
-        if (p && (p.name || p.estimated_capex)) costed.push({ ...p, name: p.name || x.label });
+        // A reply carrying a name but no numeric CAPEX is NOT a costing. The old
+        // guard accepted it, which is how a comparison table of "N/A" cells was
+        // presented as a completed cost comparison.
+        const capex = Number(p && p.estimated_capex);
+        if (p && capex > 0) {
+          costed.push({ ...p, name: p.name || x.label });
+        } else {
+          rejected.push(x.label + (p && p.name ? " (" + p.name + ")" : "") + " - no usable cost figure returned");
+        }
       }
-      if (!costed.length) throw new Error("None of the concepts could be costed. Check the pasted text contains facilities and areas.");
+      if (!costed.length) throw new Error(
+        "None of the concepts could be costed" +
+        (rejected.length ? ": " + rejected.join("; ") : "") +
+        ". Check the pasted text lists facilities with areas for each concept.");
+      if (rejected.length) setCompareWarning(
+        "Costed " + costed.length + " of " + filled.length + " detected concepts. Not costed: " +
+        rejected.join("; ") + ". The comparison below is incomplete - re-run before using it in a deliverable.");
+      else if (costed.length < 2 && filled.length < 2) setCompareWarning(
+        "Only one concept was detected in the input, so this is a single-concept estimate rather than a comparison. " +
+        "If you intended to compare several, check that each concept's heading is present in the pasted text.");
+      else setCompareWarning("");
       setCompareError(`Comparing ${costed.length} costed concepts...`);
 
       // Second, much smaller call: compare the already-costed concepts.
@@ -383,6 +427,27 @@ export default function BudgetTracker() {
           rows: facilities.filter((f) => f.name.trim()).map((f) => [f.name, f.area, f.rate, formatNumber((Number(f.area)||0)*(Number(f.rate)||0)), f.rateBasis || "user-entered"]) },
         { title: "Cost build-up (RICS NRM1 cascade)", headers: ["Cost line", "Basis", `Amount ${currency}`, "Confidence"],
           rows: wrapperRows.map((r) => [r.label, r.detail, formatNumber(r.amount), r.confidence || ""]) },
+        ...(comparison && comparison.recommended && facilities.filter((x) => x.name.trim()).length
+          ? (function () {
+              // Does the facility schedule in 6.1 belong to the recommended concept?
+              const rec = (comparison.concepts || []).find(
+                (c) => (c.name || "").toLowerCase() === String(comparison.recommended).toLowerCase());
+              const recFacilities = ((rec && rec.facilities) || []).map((x) => String(x.facility || "").toLowerCase());
+              const mine = facilities.filter((x) => x.name.trim()).map((x) => x.name.toLowerCase());
+              const overlap = mine.filter((n) => recFacilities.some((r) => r.includes(n) || n.includes(r)));
+              if (recFacilities.length && overlap.length === 0) {
+                return [{
+                  title: "WARNING - the facility schedule does not match the recommended concept",
+                  text:
+                    "The cost build-up in 6.2 was computed from the facility schedule in 6.1, which does not " +
+                    "correspond to " + comparison.recommended + ". The headline CAPEX above is therefore the cost of a " +
+                    "different scheme and must not be quoted as the cost of the recommended concept. Load the " +
+                    "recommended concept's facilities into the schedule and re-run before using either figure.",
+                }];
+              }
+              return [];
+            })()
+          : []),
         ...(comparison ? [{ title: "Concept cost comparison - full cascade per concept",
           note: "Each concept was costed separately using the same RICS NRM1 cascade, then compared on value for money rather than lowest cost.",
           headers: ["Concept", "Construction", "Prelims", "OH&P", "Contingency", "Inflation", `CAPEX ${currency}`, "Annual OPEX"],
@@ -625,6 +690,11 @@ export default function BudgetTracker() {
               ? `${detectedConcepts.length} concepts detected - each is costed separately, then compared on value for money rather than lowest cost.`
               : "One concept detected, so this section stays empty. Paste or upload a report containing several concepts to compare them."}
           </p>
+          {compareWarning && (
+            <div className="rounded-md border-2 p-3 mb-2" style={{ borderColor: "#B8863B", backgroundColor: "#FBF1E1" }}>
+              <p className="text-[11px] text-brand-text"><strong>Incomplete comparison.</strong> {compareWarning}</p>
+            </div>
+          )}
           {compareError && <p className="text-xs text-brand-danger">{friendlyError(compareError)}</p>}
           {comparison && (
             <div className="space-y-3">
