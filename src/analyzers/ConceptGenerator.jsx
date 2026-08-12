@@ -66,7 +66,9 @@ export default function ConceptGenerator() {
       "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
       "same content, read instantly, and need no key at all.");
     return await callAI({
-      provider, apiKey, model, maxTokens: 3000,
+      // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
+      // passing `model` threw "model is not defined" the moment a file was uploaded.
+      provider, apiKey, maxTokens: 3000,
       content: [
         ...blocks,
         { type: "text", text: `These are ${info.pagesRendered} page image(s) from a scanned document. Transcribe ALL text you can read, preserving headings, tables and reading order. Respond with ONLY the transcribed text - no commentary.` },
@@ -272,11 +274,6 @@ export default function ConceptGenerator() {
     <div className="space-y-6">
       <ToolIntro toolCode="CPT" />
 
-      <div>
-        <h2 className="text-xl font-bold text-brand-dark flex items-center gap-2"><Layers size={20} className="text-brand-gold" /> Concept Generator</h2>
-        <p className="text-sm text-brand-text mt-1">Paste your site findings and program brief - get 3-4 distinct, scored zoning concepts with schematic bubble diagrams.</p>
-      </div>
-
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
         <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> Bubble diagrams are AI-reasoned schematic placements from your text brief, not precise survey geometry - the level architects use at concept stage, built here to demonstrate AI-integrated workflow.</p>
@@ -382,6 +379,13 @@ export default function ConceptGenerator() {
             {recLoading && <p className="text-sm text-brand-text">Comparing concept scores...</p>}
             {recError && (<div className="space-y-1"><p className="text-sm text-brand-dark flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(recError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {recError}</p></div>)}
             {recommendation && (<div className="space-y-2 text-sm text-brand-dark"><p><span className="font-semibold">Recommendation:</span> {recommendation.recommendation}</p><p><span className="font-semibold">Tradeoffs:</span> {recommendation.tradeoffs}</p></div>)}
+            {recError && <p className="text-xs text-brand-danger mb-2">{recError}</p>}
+            {!recommendation && concepts && concepts.length > 0 && !recLoading && (
+              <p className="text-xs text-brand-danger font-semibold mb-2">
+                No recommendation has been generated yet. Sections 8 and 10 of the exported report will be
+                empty until you press the button above.
+              </p>
+            )}
             {!recommendation && !recLoading && !recError && (
               <p className="text-sm text-brand-text">
                 Once concepts are generated, get an AI recommendation on which to move forward with.

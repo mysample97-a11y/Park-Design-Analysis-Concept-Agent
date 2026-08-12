@@ -228,9 +228,25 @@ export function exportToJSON(data, filename = "analysis-report.json") {
 }
 
 export function copyToClipboard(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
-  const ta = document.createElement("textarea");
-  ta.value = text; document.body.appendChild(ta); ta.select();
-  document.execCommand("copy"); document.body.removeChild(ta);
-  return Promise.resolve();
+  // The async clipboard API REJECTS when the document is not focused, when
+  // permission is denied, or in some embedded contexts. The old code returned that
+  // rejected promise with no fallback, so the caller's .then() never fired and the
+  // button appeared to do nothing. Always fall back to the legacy path.
+  const legacy = () => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok ? Promise.resolve() : Promise.reject(new Error("copy blocked"));
+    } catch (e) { return Promise.reject(e); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).catch(legacy);
+  }
+  return legacy();
 }

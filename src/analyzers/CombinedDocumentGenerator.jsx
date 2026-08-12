@@ -45,6 +45,7 @@ export default function CombinedDocumentGenerator() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
 
   function updateInput(id, val) { setInputs((prev) => ({ ...prev, [id]: val })); }
 
@@ -57,7 +58,9 @@ export default function CombinedDocumentGenerator() {
       "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
       "same content, read instantly, and need no key at all.");
     return await callAI({
-      provider, apiKey, model, maxTokens: 3000,
+      // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
+      // passing `model` threw "model is not defined" the moment a file was uploaded.
+      provider, apiKey, maxTokens: 3000,
       content: [
         ...blocks,
         { type: "text", text: `These are ${info.pagesRendered} page image(s) from a scanned document. Transcribe ALL text you can read, preserving headings, tables and reading order. Respond with ONLY the transcribed text - no commentary.` },
@@ -162,7 +165,9 @@ export default function CombinedDocumentGenerator() {
 
   function copyBrief() {
     if (!result?.concept_brief) return;
-    copyToClipboard(result.concept_brief).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+    copyToClipboard(result.concept_brief)
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })
+      .catch(() => setCopyError("Your browser blocked the copy. Select the brief text above and copy it manually, or download the report."));
   }
 
   function buildFullReportText() {
@@ -273,14 +278,9 @@ export default function CombinedDocumentGenerator() {
     <div className="space-y-6">
       <ToolIntro toolCode="CMB" />
 
-      <div>
-        <h2 className="text-xl font-bold text-brand-dark flex items-center gap-2"><Layers size={20} className="text-brand-gold" /> Combined Document Generator</h2>
-        <p className="text-sm text-brand-text mt-1">Paste or upload the outputs of your other tools - get a consolidated Constraints & Opportunities Matrix, Design Implications, and a ready-to-paste Concept Generator brief.</p>
-      </div>
-
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: reader-v4]</p>
+        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: v7-budget-unified]</p>
       </div>
 
       <div className="card">
@@ -375,6 +375,7 @@ export default function CombinedDocumentGenerator() {
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-bold text-sm uppercase tracking-wide text-brand-warning">Concept Generator Brief (ready to paste)</h3>
               <button onClick={copyBrief} className="text-xs font-medium px-3 py-1.5 rounded-md flex items-center gap-1 bg-brand-dark text-white">{copied ? <CheckCircle2 size={13} /> : <Copy size={13} />} {copied ? "Copied!" : "Copy Brief"}</button>
+              {copyError && <p className="text-[10px] text-brand-danger mt-1">{copyError}</p>}
             </div>
             <p className="text-sm text-brand-dark leading-relaxed whitespace-pre-wrap">{result.concept_brief}</p>
           </div>

@@ -78,35 +78,108 @@ export default function BudgetTracker() {
   }
 
   // ---- Multi-concept comparison ----
-  const [conceptTexts, setConceptTexts] = useState(["", "", ""]);
+  // How many concepts the pasted text / uploaded report contains. The user declares
+  // it once; the tool splits the single input rather than asking for separate boxes.
+  // "auto" lets the splitter decide from the document's own concept headings.
+  const [conceptCount, setConceptCount] = useState("auto");
+
+  /**
+   * Split one pasted body into N concepts. Reports from the Concept Generator label
+   * concepts as "CONCEPT 1: name" or "6.2 CONCEPT 1: ...", so those headings are the
+   * split points. Falls back to a single concept when no headings are present.
+   */
+  function splitConcepts(body) {
+    const text = String(body || "").trim();
+    if (!text) return [];
+    const re = /(?:^|\n)\s*(?:\d+\.\d+\s+)?CONCEPT\s+(\d+)\s*[:\-\u2014]/gi;
+    const marks = [];
+    let m;
+    while ((m = re.exec(text)) !== null) marks.push({ index: m.index, n: Number(m[1]) });
+    if (marks.length >= 2) {
+      return marks.map((mk, i) => ({
+        label: `Concept ${mk.n}`,
+        text: text.slice(mk.index, i + 1 < marks.length ? marks[i + 1].index : text.length).trim(),
+      }));
+    }
+    // No concept headings: if the user declared a count, split on the largest
+    // structural break available so the tool still honours what they told it.
+    const declared = conceptCount === "auto" ? 1 : Number(conceptCount) || 1;
+    if (declared > 1) {
+      const chunks = text.split(/\n\s*\n\s*\n+|\n\s*---+\s*\n/).filter((c) => c.trim());
+      if (chunks.length >= declared) {
+        const per = Math.ceil(chunks.length / declared);
+        return Array.from({ length: declared }, (_, i) => ({
+          label: `Concept ${i + 1}`,
+          text: chunks.slice(i * per, (i + 1) * per).join("\n\n").trim(),
+        })).filter((c) => c.text);
+      }
+    }
+    return [{ label: "Concept 1", text }];
+  }
+
+  const detectedConcepts = splitConcepts(pasteText);
   const [comparison, setComparison] = useState(null);
   const [comparing, setComparing] = useState(false);
   const [compareError, setCompareError] = useState("");
 
   async function compareConcepts() {
-    const filled = conceptTexts.map((t, i) => ({ i, t })).filter((x) => x.t.trim());
-    if (filled.length < 2) { setCompareError("Paste at least two concepts to compare."); return; }
+    // Sourced from the single paste box, split automatically - no separate boxes.
+    const filled = detectedConcepts.map((c, i) => ({ i, t: c.text, label: c.label }));
+    if (!filled.length) { setCompareError("Paste or upload the concept information first."); return; }
     setComparing(true); setCompareError(""); setComparison(null);
     try {
+      // Cost each concept in its OWN call. One combined call asking for three full
+      // cost breakdowns plus the comparison overflowed the response limit - the reply
+      // was cut mid-array, so `recommended` never arrived and the report printed
+      // "Recommended: undefined" with only the first concept in the table.
+      const costed = [];
+      for (const x of filled) {
+        setCompareError(`Costing concept ${x.i + 1} of ${filled.length}...`);
+        const one = await callAI({
+          provider, apiKey, maxTokens: 2000, useWebSearch: true,
+          onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
+          content: "You are a cost consultant. Extract every facility and area from this ONE park concept, apply indicative construction unit rates for the stated location, and build an order-of-cost estimate using the RICS NRM1 cascade (measured works, then preliminaries, overheads and profit, contingency, inflation). " +
+            "Return ONLY valid JSON, no markdown fences: {" +
+            "\"name\":\"the concept name\"," +
+            "\"facilities\":[{\"facility\":\"\",\"area_m2\":0,\"rate_per_m2\":0,\"subtotal\":0}]," +
+            "\"construction_subtotal\":0,\"preliminaries\":0,\"ohp\":0,\"contingency\":0,\"inflation\":0," +
+            "\"estimated_capex\":0,\"annual_opex\":0," +
+            "\"largest_cost_driver\":\"the single facility contributing most\",\"driver_share_pct\":0," +
+            "\"within_budget\":true,\"confidence\":\"Verified-Macro|Verified-Adjacent-Scale|Assumption-Flagged\"," +
+            "\"bottlenecks\":[\"cost or delivery risks specific to this concept\"]," +
+            "\"opportunities\":[\"what could be added or improved if budget allows\"]}. " +
+            "Mark any rate you could not source against a published benchmark as Assumption-Flagged.\n\n" +
+            `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\n${x.label}:\n${x.t}`,
+        });
+        const p = extractJSON(one);
+        if (p && (p.name || p.estimated_capex)) costed.push({ ...p, name: p.name || x.label });
+      }
+      if (!costed.length) throw new Error("None of the concepts could be costed. Check the pasted text contains facilities and areas.");
+      setCompareError(`Comparing ${costed.length} costed concepts...`);
+
+      // Second, much smaller call: compare the already-costed concepts.
       const text = await callAI({
-        provider, apiKey, maxTokens: 3000, useWebSearch: true,
-        onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
-        content: "You are a cost consultant comparing park design concepts for affordability. For EACH concept, extract its facilities and areas, apply indicative construction unit rates for the stated location, and build an order-of-cost estimate using the RICS NRM1 cascade (measured works, then preliminaries, overheads and profit, contingency, inflation). " +
-          "Then compare them. Return ONLY valid JSON, no markdown fences: {" +
-          "\"concepts\":[{\"name\":\"\",\"estimated_capex\":0,\"largest_cost_driver\":\"the single facility contributing most\",\"driver_share_pct\":0,\"within_budget\":true,\"confidence\":\"Verified-Macro|Verified-Adjacent-Scale|Assumption-Flagged\"}]," +
+        provider, apiKey, maxTokens: 2000,
+        content: "You are a cost consultant. These park concepts have ALREADY been costed - do not recost them. Compare them on value for money, not simply lowest cost. Return ONLY valid JSON, no markdown fences: {" +
           "\"recommended\":\"name of the most FEASIBLE concept - deliverable within the budget while retaining the most design value, which is not necessarily the cheapest\"," +
           "\"recommendation_reason\":\"3-4 sentences: why this one is deliverable, what it retains that the others lose, and what the runner-up would have offered\"," +
           "\"feasibility_notes\":[{\"concept\":\"\",\"verdict\":\"Deliverable|Deliverable with reductions|Not deliverable within budget\",\"reason\":\"\"}]," +
           "\"cost_reduction_options\":[{\"concept\":\"\",\"facility\":\"\",\"action\":\"reduce, substitute or combine - and the approximate saving\"}]," +
           "\"hybrid_suggestion\":\"if elements of different concepts could be combined for better value, say how - otherwise empty string\"," +
           "\"decision_note\":\"one sentence stating plainly that this is a cost-based recommendation only and the design decision remains with the human designer\"}. " +
-          "Mark every rate you could not source against a published benchmark as Assumption-Flagged. Do not present invented figures as verified.\n\n" +
-          `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\n` +
-          filled.map((x) => `CONCEPT ${x.i + 1}:\n${x.t}`).join("\n\n---\n\n"),
+          "Explain WHY the recommended concept is the best value and how it is feasible, not merely that it is cheapest.\n\n" +
+          `CURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\nCOSTED CONCEPTS:\n` +
+          JSON.stringify(costed.map((c) => ({
+            name: c.name, estimated_capex: c.estimated_capex, largest_cost_driver: c.largest_cost_driver,
+            driver_share_pct: c.driver_share_pct, within_budget: c.within_budget, confidence: c.confidence,
+            bottlenecks: c.bottlenecks, opportunities: c.opportunities,
+          })), null, 2),
       });
-      const parsed = extractJSON(text);
-      if (!parsed || !parsed.concepts) throw new Error("The AI did not return a comparison in the expected format. Try again.");
-      setComparison(parsed);
+      const parsed = extractJSON(text) || {};
+      // The per-concept costings are authoritative and always present, so the
+      // comparison never renders empty even if this second call disappoints.
+      setComparison({ ...parsed, concepts: costed });
+      setCompareError("");
     } catch (e) {
       setCompareError(e.message || "Could not compare concepts.");
     } finally { setComparing(false); }
@@ -129,10 +202,39 @@ export default function BudgetTracker() {
       });
       const parsed = extractJSON(text);
       if (!Array.isArray(parsed) || !parsed.length) throw new Error("The AI did not return rates in the expected format. Try again, or enter rates manually.");
+      // Match researched rates to facilities. This used to require an EXACT name
+      // match, so "Central Smart Solar Plaza" never matched "Smart Solar Plaza" and
+      // every rate stayed blank - which is why the whole estimate came out as zero.
+      const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+      const score = (a, b) => {
+        const A = new Set(norm(a).split(" ").filter((w) => w.length > 2));
+        const B = new Set(norm(b).split(" ").filter((w) => w.length > 2));
+        if (!A.size || !B.size) return 0;
+        let hit = 0; A.forEach((w) => { if (B.has(w)) hit++; });
+        return hit / Math.min(A.size, B.size);
+      };
+      let matched = 0, unmatched = [];
       setFacilities((prev) => prev.map((f) => {
-        const hit = parsed.find((r) => (r.name || "").toLowerCase().trim() === f.name.toLowerCase().trim());
-        return hit ? { ...f, rate: String(hit.rate_per_m2 ?? f.rate), rateBasis: hit.basis || "", rateConfidence: hit.confidence || "Assumption-Flagged" } : f;
+        if (!f.name.trim()) return f;
+        let best = null, bestScore = 0;
+        parsed.forEach((r) => { const sc = score(r.name, f.name); if (sc > bestScore) { bestScore = sc; best = r; } });
+        // Exact or strong partial match wins outright.
+        if (best && bestScore >= 0.5) {
+          matched++;
+          return { ...f, rate: String(best.rate_per_m2 ?? f.rate), rateBasis: best.basis || "", rateConfidence: best.confidence || "Assumption-Flagged" };
+        }
+        // No match: fall back to the median researched rate rather than leaving zero,
+        // and flag it clearly so the user knows it is a stand-in.
+        const nums = parsed.map((r) => Number(r.rate_per_m2)).filter((n) => n > 0).sort((a, b) => a - b);
+        if (nums.length) {
+          unmatched.push(f.name);
+          const median = nums[Math.floor(nums.length / 2)];
+          return { ...f, rate: String(median), rateBasis: "median of researched rates (no direct match)", rateConfidence: "Assumption-Flagged" };
+        }
+        return f;
       }));
+      if (unmatched.length) setResearchError(
+        `No researched rate matched: ${unmatched.join(", ")}. The median rate was applied and flagged as Assumption-Flagged - review these before relying on the total.`);
       setResearchNote(`Rates researched for ${location} in ${currency}. Every rate carries a confidence band - verify Assumption-Flagged items before relying on the total.`);
     } catch (e) {
       setResearchError(e.message || "Could not research rates.");
@@ -148,7 +250,9 @@ export default function BudgetTracker() {
       "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
       "same content, read instantly, and need no key at all.");
     return await callAI({
-      provider, apiKey, model, maxTokens: 3000,
+      // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
+      // passing `model` threw "model is not defined" the moment a file was uploaded.
+      provider, apiKey, maxTokens: 3000,
       content: [
         ...blocks,
         { type: "text", text: `These are ${info.pagesRendered} page image(s) from a scanned document. Transcribe ALL text you can read, preserving headings, tables and reading order. Respond with ONLY the transcribed text - no commentary.` },
@@ -194,7 +298,17 @@ export default function BudgetTracker() {
     { label: `Annual OPEX (${rates.opex.pct}%)`, detail: `Applied to ${rates.opex.base}`, amount: annualOpex, confidence: rates.opex.confidence },
   ];
 
+  /**
+   * One action, two behaviours. The tool decides from the input rather than making
+   * the user pick: one concept -> estimate plus a direct conclusion; several ->
+   * cost each, compare, recommend the best, and say what the budget headroom allows.
+   */
   async function generateInsight() {
+    // Multiple concepts detected: run the comparison path instead, then continue
+    // into the single-estimate insight so both sections are populated.
+    if (detectedConcepts.length > 1) {
+      await compareConcepts();
+    }
     setInsightLoading(true); setInsight(null); setInsightError("");
     const summary = {
       facilities: facilities.filter((f) => f.name.trim()).map((f) => ({ name: f.name, area_m2: f.area, rate_per_m2: f.rate, subtotal: (Number(f.area) || 0) * (Number(f.rate) || 0) })),
@@ -204,9 +318,33 @@ export default function BudgetTracker() {
       rate_assumptions: rates,
     };
     try {
+      const multi = detectedConcepts.length > 1;
+      const cap = Number(budgetCap) || 0;
+      const bestCapex = multi && comparison?.concepts?.length
+        ? Math.min(...comparison.concepts.map((c) => Number(c.estimated_capex) || Infinity))
+        : totalCapex;
+      const headroom = cap && bestCapex && Number.isFinite(bestCapex) ? cap - bestCapex : null;
+      const headroomPct = cap && headroom !== null ? Math.round((headroom / cap) * 100) : null;
+
       const text = await callAI({
         provider, apiKey, maxTokens: 2500,
-        content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: (1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high/low, (2) 'confidence_note': 1-2 sentences on which parts of this estimate rest on Assumption-Flagged rates and should be verified, (3) 'conclusion': 2-3 sentences on overall feasibility/next cost-planning step. Do not invent benchmark prices not present. Respond with ONLY valid JSON, no markdown fences: {\"observations\": [\"\"], \"confidence_note\": \"\", \"conclusion\": \"\"}" + checklistPrompt("BDG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: " +
+          "(1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high or low, " +
+          "(2) 'confidence_note': 1-2 sentences on which parts rest on Assumption-Flagged rates and must be verified, " +
+          (multi
+            ? "(3) 'conclusion': 4-6 sentences naming which concept is the best value and WHY it is the best - not merely the cheapest. State how it is feasible within the budget, what the runner-up would have offered, and the principal bottlenecks that could still move the number. "
+            : "(3) 'conclusion': 3-4 sentences on overall feasibility and the next cost-planning step. ") +
+          (headroom !== null && headroom > 0
+            ? `(4) 'optimisations': array of specific things that could be ADDED or upgraded with the remaining budget headroom of about ${formatNumber(headroom)} ${currency} (${headroomPct}% of the cap), each with an approximate cost. Only propose things consistent with the facilities listed. `
+            : "(4) 'optimisations': array of cost reductions that would bring this within budget, each with an approximate saving. ") +
+          "(5) 'bottlenecks': array of short strings on what could push the cost up. " +
+          "Do not invent benchmark prices not present. Respond with ONLY valid JSON, no markdown fences: " +
+          '{"observations": [""], "confidence_note": "", "conclusion": "", "optimisations": [""], "bottlenecks": [""]}' +
+          checklistPrompt("BDG") + "\n\nMODE: " + (multi ? `comparison of ${detectedConcepts.length} concepts` : "single concept estimate") +
+          (cap ? `\nBUDGET CAP: ${formatNumber(cap)} ${currency}` : "") +
+          (headroom !== null ? `\nHEADROOM AGAINST BEST CONCEPT: ${formatNumber(headroom)} ${currency}` : "") +
+          (multi && comparison?.concepts ? "\n\nCOSTED CONCEPTS:\n" + JSON.stringify(comparison.concepts, null, 2) : "") +
+          "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       setInsight(extractJSON(text));
     } catch (e) {
@@ -245,7 +383,33 @@ export default function BudgetTracker() {
           rows: facilities.filter((f) => f.name.trim()).map((f) => [f.name, f.area, f.rate, formatNumber((Number(f.area)||0)*(Number(f.rate)||0)), f.rateBasis || "user-entered"]) },
         { title: "Cost build-up (RICS NRM1 cascade)", headers: ["Cost line", "Basis", `Amount ${currency}`, "Confidence"],
           rows: wrapperRows.map((r) => [r.label, r.detail, formatNumber(r.amount), r.confidence || ""]) },
-        ...(comparison ? [{ title: "Concept cost comparison",
+        ...(comparison ? [{ title: "Concept cost comparison - full cascade per concept",
+          note: "Each concept was costed separately using the same RICS NRM1 cascade, then compared on value for money rather than lowest cost.",
+          headers: ["Concept", "Construction", "Prelims", "OH&P", "Contingency", "Inflation", `CAPEX ${currency}`, "Annual OPEX"],
+          rows: (comparison.concepts || []).map((c) => [
+            c.name, formatNumber(c.construction_subtotal), formatNumber(c.preliminaries), formatNumber(c.ohp),
+            formatNumber(c.contingency), formatNumber(c.inflation), formatNumber(c.estimated_capex), formatNumber(c.annual_opex),
+          ]) },
+        { title: "Why the recommended concept is recommended",
+          text: [
+            comparison.recommended ? `Recommended: ${comparison.recommended}` : "",
+            comparison.recommendation_reason || "",
+          ].filter(Boolean).join("\n") },
+        ...((comparison.concepts || []).some((c) => (c.bottlenecks || []).length || (c.opportunities || []).length)
+          ? [{ title: "Bottlenecks and opportunities per concept",
+              items: (comparison.concepts || []).flatMap((c) => [
+                ...(c.bottlenecks || []).map((b) => `${c.name} - bottleneck: ${b}`),
+                ...(c.opportunities || []).map((o) => `${c.name} - opportunity: ${o}`),
+              ]) }]
+          : []),
+        ...((insight?.optimisations || []).length ? [{
+          title: (Number(budgetCap) || 0) && totalCapex && Number(budgetCap) > totalCapex
+            ? "Optimisations available within the remaining budget"
+            : "Cost reduction options",
+          items: insight.optimisations }] : []),
+        ...((insight?.bottlenecks || []).length ? [{
+          title: "Bottlenecks that could move the cost", items: insight.bottlenecks }] : []),
+        { title: "Concept cost summary",
           note: `Recommended: ${comparison.recommended}. ${comparison.recommendation_reason || ""}`,
           headers: ["Concept", `Est. CAPEX ${currency}`, "Largest cost driver", "Feasibility verdict", "Confidence"],
           rows: (comparison.concepts || []).map((c) => {
@@ -293,11 +457,6 @@ export default function BudgetTracker() {
     <div className="space-y-6">
       <ToolIntro toolCode="BDG" />
 
-      <div>
-        <h2 className="text-xl font-bold text-brand-dark flex items-center gap-2"><Calculator size={20} className="text-brand-gold" /> Budget Tracker</h2>
-        <p className="text-sm text-brand-text mt-1">Estimate capital and operating cost with a cascading wrapper method - every rate carries an honest confidence band.</p>
-      </div>
-
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <Info size={18} className="text-brand-warning shrink-0 mt-0.5" />
         <p className="text-sm text-brand-text"><span className="font-semibold">Rates are editable defaults, not verified for your site.</span> Confidence bands (Verified-Macro / Verified-Adjacent-Scale / Assumption-Flagged) show how much to trust each - always verify Assumption-Flagged items against real benchmark data before relying on the total.</p>
@@ -322,9 +481,22 @@ export default function BudgetTracker() {
           </div>
           <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Paste a concept's facility schedule (the Concept Generator now lists facilities per zone with areas), or a program description..." rows={4} className="textarea" />
           <label className="text-[11px] font-medium text-brand-gold flex items-center gap-1 cursor-pointer hover:underline w-fit">
-            <Plus size={12} /> Upload facility list (.xlsx, .csv, .docx, .rtf, .txt)
+            <Plus size={12} /> Upload facility list or concept report (.xlsx, .csv, .docx, .rtf, .txt, .pdf, image)
             <input type="file" accept={EXPORT_ACCEPT} onChange={handleFacilityFile} className="sr-only" />
           </label>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <label className="text-[11px] font-semibold text-brand-text">How many concepts is this?</label>
+            <select value={conceptCount} onChange={(e) => setConceptCount(e.target.value)}
+              className="text-xs bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 outline-none">
+              <option value="auto">Detect automatically</option>
+              {[1,2,3,4,5].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <span className="text-[11px] text-brand-success">
+              {detectedConcepts.length === 0 ? "Nothing detected yet"
+                : detectedConcepts.length === 1 ? "1 concept detected - a single estimate and conclusion will be produced"
+                : `${detectedConcepts.length} concepts detected - each will be costed and compared`}
+            </span>
+          </div>
           <button onClick={autoDetect} disabled={detecting || !apiKey} className="btn-gold w-full"><Sparkles size={16} /> {detecting ? "Detecting..." : "Auto-Detect Facilities"}</button>
           {detectError && (<div className="space-y-1"><p className="text-xs text-brand-dark flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(detectError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-4">Technical: {detectError}</p></div>)}
         </div>
@@ -446,20 +618,13 @@ export default function BudgetTracker() {
 
 
       <div className="card">
-        <div className="card-header">Compare Concepts (optional)</div>
+        <div className="card-header">Concept cost comparison</div>
         <div className="p-4 space-y-3">
           <p className="text-[11px] text-brand-text">
-            Paste two or three concepts from the Concept Generator (its report lists facilities and areas per zone).
-            Each is costed separately, then compared on value for money - not simply lowest cost.
+            Populated automatically from the input above. {detectedConcepts.length > 1
+              ? `${detectedConcepts.length} concepts detected - each is costed separately, then compared on value for money rather than lowest cost.`
+              : "One concept detected, so this section stays empty. Paste or upload a report containing several concepts to compare them."}
           </p>
-          {conceptTexts.map((t, i) => (
-            <textarea key={i} value={t} rows={3} className="textarea"
-              placeholder={`Concept ${i + 1} - paste its facility schedule / zone list`}
-              onChange={(e) => { const c = [...conceptTexts]; c[i] = e.target.value; setConceptTexts(c); }} />
-          ))}
-          <button onClick={compareConcepts} disabled={comparing || !apiKey} className="btn-dark w-full">
-            <Sparkles size={15} /> {comparing ? "Comparing concepts..." : "Compare Concepts & Recommend Best Value"}
-          </button>
           {compareError && <p className="text-xs text-brand-danger">{friendlyError(compareError)}</p>}
           {comparison && (
             <div className="space-y-3">

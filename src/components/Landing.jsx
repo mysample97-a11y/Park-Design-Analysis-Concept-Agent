@@ -64,8 +64,11 @@ export default function Landing({ onOpen, onNav }) {
     const STAGES = ["Read the ground","Site context","Climate","Synthesis","Concept","Feasibility"];
 
     function onScroll() {
-      const max = document.body.scrollHeight - innerHeight;
-      progress = max > 0 ? clamp01(scrollY / max) : 0;
+      // Explicitly window-qualified. Bare innerHeight/scrollY resolve only because
+      // they are implicit globals; line 96 already uses window.innerHeight, so this
+      // keeps the file consistent and survives any future module/strict context.
+      const max = document.body.scrollHeight - window.innerHeight;
+      progress = max > 0 ? clamp01(window.scrollY / max) : 0;
       const barEl = $("bar"); if (barEl) barEl.style.width = (progress * 100) + "%";
   
       const i = Math.min(5, Math.floor(progress * 6.5));

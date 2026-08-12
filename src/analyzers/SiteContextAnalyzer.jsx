@@ -68,6 +68,10 @@ export default function SiteContextAnalyzer() {
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState("");
 
+  // Total site area. autoSuggestZones apportions zone areas from this, and it drives
+  // the site-wide capacity band. It was referenced before it existed - the tool would
+  // have thrown "siteArea is not defined" on every research run.
+  const [siteArea, setSiteArea] = useState("");
   const [zones, setZones] = useState([{ id: uid(), name: "", area: "" }]);
   const [paths, setPaths] = useState([{ id: uid(), name: "", type: "path", width: "", levelChange: "" }]);
   const [insight, setInsight] = useState(null);
@@ -329,7 +333,8 @@ export default function SiteContextAnalyzer() {
     try {
       const adj = (ctxData?.adjacencies || []).map((a) => `${a.direction}: ${a.land_use || "unknown"}`).join("; ");
       const resText = await callAI({
-        provider, apiKey, model, maxTokens: 1200,
+        // No `model` - this context exposes { provider, apiKey, meta } only.
+        provider, apiKey, maxTokens: 1200,
         content:
           `For a public park of ${siteArea} m2 at "${location || "the stated location"}", propose the functional zones such a park would typically contain. ` +
           `Adjacent land uses by edge: ${adj || "not established"}. ` +
@@ -398,6 +403,7 @@ export default function SiteContextAnalyzer() {
           <div className="px-4 py-3 border-b border-[#E8E2D5] bg-[#FBF7EE]"><h2 className="font-bold text-sm uppercase tracking-wide">Step 1 - Describe Your Site</h2></div>
           <div className="p-4 space-y-3">
             <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Project location (e.g. Riverside Park, Chicago, USA)" className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-2.5 focus:border-[#C9A46A] outline-none" />
+            <input type="number" value={siteArea} onChange={(e) => setSiteArea(e.target.value)} placeholder="Total site area in m2 (optional - enables capacity estimate and proposed zones)" className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-2.5 focus:border-[#C9A46A] outline-none font-mono" />
             <textarea value={siteDescription} onChange={(e) => setSiteDescription(e.target.value)} placeholder="Describe what's around the site (adjacent buildings, roads, land uses) - or upload a GIS/map image below instead" rows={4} className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-3 focus:border-[#C9A46A] outline-none resize-y" />
             <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
               <ImageIcon size={15} /> {imageLoading ? "Reading images..." : "Upload Site / GIS Map Images (up to 4, optional)"}
