@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-brand-cream text-brand-dark font-sans antialiased;
+  }
+}
+
+@layer components {
+  .btn-gold {
+    @apply bg-brand-gold text-brand-dark font-bold px-4 py-3 rounded-md flex items-center justify-center gap-2 shadow-md hover:brightness-105 active:scale-[0.98] transition-all disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-dark {
+    @apply bg-brand-dark text-white font-bold px-4 py-2.5 rounded-md flex items-center gap-2 shadow-md hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-outline {
+    @apply text-xs font-medium border border-[#DDD6C9] px-3 py-2 rounded-md flex items-center gap-1 hover:border-brand-gold transition-colors;
+  }
+  .card {
+    @apply bg-white rounded-lg border-2 border-brand-border overflow-hidden;
+  }
+  .card-header {
+    @apply px-4 py-3 border-b border-brand-border bg-[#FBF7EE] font-bold text-sm uppercase tracking-wide;
+  }
+  .input {
+    @apply w-full text-sm bg-[#F7F5F1] border-2 border-brand-border rounded-md p-2.5 focus:border-brand-gold outline-none transition-colors;
+  }
+  .textarea {
+    @apply w-full text-sm bg-[#F7F5F1] border-2 border-brand-border rounded-md p-3 focus:border-brand-gold outline-none resize-y transition-colors;
+  }
+}
+
+
+/* ---- Mobile: prevent horizontal overflow and allow tables to scroll ---- */
+html, body { max-width: 100%; overflow-x: hidden; }
+#root { max-width: 100%; }
+
+@media (max-width: 640px) {
+  .card { border-radius: 8px; }
+  .card-header { font-size: 12px; padding: 10px 12px; }
+  .input, .textarea { font-size: 16px; } /* 16px prevents iOS zoom-on-focus */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+  pre { font-size: 10px; }
+  .btn-gold, .btn-dark, .btn-outline { width: 100%; justify-content: center; }
+}
+
+/* any wide element inside a card scrolls rather than pushing the page wide */
+.card .overflow-x-auto { max-width: 100%; }
+svg { max-width: 100%; height: auto; }
+
+/* ── Defensive: form controls state their own colour ──
+   landing.css declares body{color:var(--paper)} (#E8ECF2). CSS imported by a
+   component is still global, and an unlayered rule beats Tailwind's @layer base
+   text-brand-dark - so app inputs, which set a near-white background and no text
+   colour, rendered typed text invisible. landing.css is now scoped, but stating
+   the colour here means no future page-level stylesheet can reintroduce this.
+   Unlayered on purpose, so it wins the same way. */
+input, textarea, select { color: #1C2333; }
+.landing-root input, .landing-root textarea, .landing-root select { color: inherit; }
