@@ -342,6 +342,8 @@ export default function SiteContextAnalyzer() {
           '{"zones":[{"name":"","area":0}]}',
       });
       const parsed = extractJSON(resText);
+      if (!parsed) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
       const proposed = (parsed?.zones || []).filter((z) => z?.name).map((z) => ({
         id: uid("zone"), name: String(z.name), area: String(Math.round(Number(z.area) || 0)),
       }));

@@ -178,6 +178,8 @@ export default function SurveyAnalyzer() {
           "CRITICAL RULES: derive themes from the responses themselves. Do NOT default to shade, accessibility and safety unless the data actually shows them. Report anything unusual or site-specific that respondents raised, and say whether each theme is actionable by design, by management, or outside the project's control. Never use groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw,
       });
       const parsedAnalysis = extractJSON(text);
+      if (!parsedAnalysis) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
       setAnalysis(parsedAnalysis);
       // Field-contract guard: say so plainly when the model omits expected keys,
       // rather than letting sections 8 and 10 print "(not generated)" silently.

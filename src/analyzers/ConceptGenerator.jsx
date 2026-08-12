@@ -164,12 +164,39 @@ export default function ConceptGenerator() {
     if (!concepts) return;
     setRecLoading(true); setRecError(""); setRecommendation(null);
     try {
-      const summary = concepts.map((c) => ({ name: c.name, vision: c.vision, scores: c.scores, overall: overallScore(c) }));
+      const summary = concepts.map((c) => ({
+        name: c.name, vision: c.vision, organising_idea: c.organising_idea,
+        scores: c.scores, overall: overallScore(c),
+        strengths: c.strengths, weaknesses: c.weaknesses,
+      }));
       const text = await callAI({
-        provider, apiKey, maxTokens: 800,
-        content: "Given these scored park design concepts, write a 'recommendation' field (2-3 sentences, cite specific scores) on which to move forward with, and a 'tradeoffs' field (1 sentence) on what's given up by not choosing a runner-up. Respond with ONLY valid JSON, no markdown fences: {\"recommendation\": \"\", \"tradeoffs\": \"\"}\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        provider, apiKey, maxTokens: 1400,
+        content:
+          "Given these scored park design concepts, recommend which to move forward with. " +
+          "Name the concept explicitly using its exact name from the data. Cite specific scores. " +
+          "Respond with ONLY valid JSON, no markdown fences: " +
+          '{"recommended_name":"the exact concept name","recommendation":"2-3 sentences on why","tradeoffs":"1-2 sentences on what is given up by not choosing the runner-up"}' +
+          "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
-      setRecommendation(extractJSON(text));
+
+      // extractJSON returns NULL on an unrecoverable reply - it does not throw.
+      // The previous code passed that null straight into state, so a failed call
+      // left the recommendation empty with no message and sections 8 and 10 of
+      // the export silently blank. Fail loudly instead.
+      const parsed = extractJSON(text);
+      if (!parsed) throw new Error(
+        "The reply could not be read as structured data, even after recovery. " +
+        "This is usually a truncated response - press the button again.");
+
+      // Tolerate the key names a model may substitute.
+      const rec = {
+        recommended_name: parsed.recommended_name || parsed.recommended || parsed.best_concept || "",
+        recommendation: parsed.recommendation || parsed.reason || parsed.rationale || "",
+        tradeoffs: parsed.tradeoffs || parsed.trade_offs || parsed.tradeoff || "",
+      };
+      if (!rec.recommendation) throw new Error(
+        "The model returned no recommendation text. Press the button again.");
+      setRecommendation(rec);
     } catch (e) {
       setRecError(e.message || "Something went wrong. Try again.");
     } finally {
@@ -194,7 +221,9 @@ export default function ConceptGenerator() {
       if (fac.length) { lines.push("  FACILITY SCHEDULE (for cost estimating):"); fac.forEach((f) => lines.push(`    - ${f}`)); lines.push(""); }
     });
     if (recommendation) {
-      lines.push("RECOMMENDED CONCEPT", recommendation.recommendation || "", "", "TRADE-OFFS", recommendation.tradeoffs || "", "");
+      lines.push("RECOMMENDED CONCEPT",
+        (recommendation.recommended_name ? recommendation.recommended_name + " - " : "") + (recommendation.recommendation || ""),
+        "", "TRADE-OFFS", recommendation.tradeoffs || "", "");
     } else {
       lines.push("RECOMMENDED CONCEPT", "(not generated - click 'Recommend Best Concept' before exporting)", "");
     }
@@ -260,7 +289,10 @@ export default function ConceptGenerator() {
             ).join("")
         : "",
       interpretation: recommendation ? `${recommendation.recommendation || ""}${recommendation.tradeoffs ? "\n\nTrade-offs: " + recommendation.tradeoffs : ""}` : "",
-      conclusions: recommendation ? [recommendation.recommendation, recommendation.tradeoffs].filter(Boolean) : [],
+      conclusions: recommendation
+        ? [recommendation.recommended_name ? "Recommended: " + recommendation.recommended_name : "",
+           recommendation.recommendation, recommendation.tradeoffs].filter(Boolean)
+        : [],
       runLimitations: [],
       extraRefs: webSources,
       overflow: overflowText,
@@ -391,7 +423,7 @@ export default function ConceptGenerator() {
             </div>
             {recLoading && <p className="text-sm text-brand-text">Comparing concept scores...</p>}
             {recError && (<div className="space-y-1"><p className="text-sm text-brand-dark flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(recError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {recError}</p></div>)}
-            {recommendation && (<div className="space-y-2 text-sm text-brand-dark"><p><span className="font-semibold">Recommendation:</span> {recommendation.recommendation}</p><p><span className="font-semibold">Tradeoffs:</span> {recommendation.tradeoffs}</p></div>)}
+            {recommendation && (<div className="space-y-2 text-sm text-brand-dark"><p><span className="font-semibold">Recommended:</span> {recommendation.recommended_name || "(not named)"}</p><p>{recommendation.recommendation}</p><p><span className="font-semibold">Tradeoffs:</span> {recommendation.tradeoffs}</p></div>)}
             {recError && <p className="text-xs text-brand-danger mb-2">{recError}</p>}
             {!recommendation && concepts && concepts.length > 0 && !recLoading && (
               <p className="text-xs text-brand-danger font-semibold mb-2">

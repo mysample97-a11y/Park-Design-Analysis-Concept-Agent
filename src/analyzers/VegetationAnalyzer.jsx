@@ -37,6 +37,8 @@ export default function VegetationAnalyzer() {
         content: `For the location "${location}", give a reference planting palette of 10-14 species suitable for public landscape there, prioritising native and climate-adapted species. Respond with ONLY a JSON array, no markdown fences: [{"id":"short_id","name":"Common name (Botanical name)","type":"Canopy Tree|Palm|Shrub|Groundcover|Accent","water":"Low|Medium|High","shade":"Full Sun|Part Shade|Shade","origin":"Native|Adaptive|Introduced - note"}]. Use real species that genuinely grow in that climate. Do not invent species.`,
       });
       let parsed = extractJSON(text);
+      if (!parsed) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
       if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
         const arr = Object.values(parsed).find((v) => Array.isArray(v) && v.length);
         if (arr) parsed = arr;
@@ -133,7 +135,12 @@ export default function VegetationAnalyzer() {
           "(4) 'conclusion': 2-3 sentences giving the single clearest planting/terrain/soil action to take next. " +
           "Also return 'existing_value': a short paragraph on the ecological and amenity value of the existing planting and what is lost if it is cleared. Also return 'existing_vegetation': an array of {species, approx_count, condition, position, verdict (retain/relocate/remove), reason} assessing the existing planting inventory supplied - return an empty array if no inventory was given. Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"existing_value\": \"\", \"existing_vegetation\": [{\"species\": \"\", \"approx_count\": \"\", \"condition\": \"\", \"position\": \"\", \"verdict\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("VEG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
-      setInsight(extractJSON(text));
+      // extractJSON returns NULL on an unrecoverable reply - it does not throw.
+      // Passing that null into state leaves the section silently empty.
+      const parsedInsight = extractJSON(text);
+      if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
+      setInsight(parsedInsight);
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {

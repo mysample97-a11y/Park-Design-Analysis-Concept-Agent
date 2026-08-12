@@ -152,6 +152,8 @@ export default function SolarAnalyzer() {
           "Give 5 to 7 zones covering the usual range: arrival, active recreation, children's play, passive/quiet, gathering/event, planting/biodiversity, service.",
       });
       const parsed = extractJSON(text);
+      if (!parsed) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
       if (Array.isArray(parsed) && parsed.length) {
         setZones(parsed.map((z) => ({
           id: uid(),
@@ -265,7 +267,12 @@ export default function SolarAnalyzer() {
           "\"conclusion\":\"2-3 sentences naming the single highest-priority shade intervention\"}" +
           checklistPrompt("SOL") + "\n\nCOMPUTED DATA:\n" + JSON.stringify(summary, null, 2),
       });
-      setInsight(extractJSON(text));
+      // extractJSON returns NULL on an unrecoverable reply - it does not throw.
+      // Passing that null into state leaves the section silently empty.
+      const parsedInsight = extractJSON(text);
+      if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
+      setInsight(parsedInsight);
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
     finally { setInsightLoading(false); }
   }

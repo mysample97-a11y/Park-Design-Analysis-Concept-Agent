@@ -36,6 +36,8 @@ export default function WindAnalyzer() {
         content: `For the location "${location}", give the prevailing seasonal wind characteristics. Respond with ONLY a JSON array of 4 season objects, no markdown fences: [{"id":"winter","label":"Winter (months)","prevailing":"compass direction","speedRange":"x-y km/h","character":"one sentence","dustRisk":"Low|Medium|High"}]. Use the four seasons appropriate to that location's climate. Base this on published climate references; do not invent precise wind-rose percentages.`,
       });
       const parsed = extractJSON(text);
+      if (!parsed) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
       // Models return this in several shapes. Accept any of them rather than failing:
       //   [ {...} ]                          - the requested array
       //   { seasons: [ {...} ] }             - wrapped in a key
@@ -140,7 +142,12 @@ export default function WindAnalyzer() {
         provider, apiKey, maxTokens: 2500,
         content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Also return: 'governing_criteria' (one sentence naming the comfort criteria actually applied and whether the project location publishes its own), 'extreme_events' (array of {event, likelihood, design_response} for storm/shamal/dust events documented for this region - empty array if none are documented), and 'contextual_effects' (array of {factor, applies (boolean), implication} covering effects such as downwash from adjacent tall buildings, channelling between blocks, and corner acceleration). Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"governing_criteria\": \"\", \"extreme_events\": [{\"event\": \"\", \"likelihood\": \"\", \"design_response\": \"\"}], \"contextual_effects\": [{\"factor\": \"\", \"applies\": true, \"implication\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("WND") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
-      setInsight(extractJSON(text));
+      // extractJSON returns NULL on an unrecoverable reply - it does not throw.
+      // Passing that null into state leaves the section silently empty.
+      const parsedInsight = extractJSON(text);
+      if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
+      setInsight(parsedInsight);
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {

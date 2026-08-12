@@ -155,7 +155,12 @@ export default function CombinedDocumentGenerator() {
           "(3) 'concept_brief': a single consolidated plain-text brief (500-800 words) written to be pasted directly into a Concept Generator. It must carry forward: the key findings, constraints and opportunities from every section; the programme requirements; ANY comparable projects and their lessons from the location research; and ANY identified gaps or ungoverned standards, stated as open items the concept must account for. Dense with concrete specifics - numbers, standards, named findings - not vague summary language. " +
           "Respond with ONLY valid JSON, no markdown fences: {\"matrix\": [{\"theme\":\"\",\"constraint\":\"\",\"opportunity\":\"\"}], \"design_implications\": [\"\"], \"concept_brief\": \"\"}" + checklistPrompt("CMB") + "\n\nSECTIONS:\n" + combined,
       });
-      setResult(extractJSON(text));
+      // extractJSON returns NULL on an unrecoverable reply - it does not throw.
+      // Passing that null into state leaves the section silently empty.
+      const parsedResult = extractJSON(text);
+      if (!parsedResult) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
+      setResult(parsedResult);
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
     } finally {
@@ -280,7 +285,7 @@ export default function CombinedDocumentGenerator() {
 
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: v11-facility-areas]</p>
+        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: v12-null-guards]</p>
       </div>
 
       <div className="card">

@@ -483,7 +483,12 @@ export default function BudgetTracker() {
           (multi && comparison?.concepts ? "\n\nCOSTED CONCEPTS:\n" + JSON.stringify(comparison.concepts, null, 2) : "") +
           "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
-      setInsight(extractJSON(text));
+      // extractJSON returns NULL on an unrecoverable reply - it does not throw.
+      // Passing that null into state leaves the section silently empty.
+      const parsedInsight = extractJSON(text);
+      if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
+        + "This is usually a truncated response - shorten the input or run it again.");
+      setInsight(parsedInsight);
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
