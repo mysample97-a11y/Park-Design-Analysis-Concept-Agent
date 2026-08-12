@@ -145,7 +145,8 @@ export default function ConceptGenerator() {
         provider, apiKey, maxTokens: 6000,
         content:
           `You are a landscape architecture concept-design assistant. Given the site analysis findings and program brief below, generate ${numConcepts} DISTINCT zoning concept variants for a park redesign. Each concept should meaningfully differ in spatial organization, not just wording. ` +
-          "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point), facilities (array of short strings naming the BUILT facilities in that zone, e.g. 'shade pergola', 'play equipment', 'cafe kiosk', 'paved plaza' - these feed a cost estimate so be concrete and complete)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
+          "CRITICAL: every facility must have a numeric area_m2. A facility list without areas is unusable downstream. " +
+          "For each concept output: 'name' (short, evocative), 'vision' (1-2 sentence design narrative), 'zones' (array of {name, category, area_pct (number, all zones sum to ~100), position (one of exactly: N, NE, E, SE, S, SW, W, NW, Center), rationale (1 sentence tying placement to a SPECIFIC finding from the brief - cite the actual data point), facilities (array of {name, area_m2} objects naming the BUILT facilities in that zone, e.g. {\"name\":\"shade pergola\",\"area_m2\":400} - be concrete and complete, and the facility areas within a zone must sum to approximately that zone's own area. EVERY facility MUST carry a positive area_m2: these feed a cost estimate directly and a facility without an area cannot be costed)}), and 'scores' (object with keys innovation, human_centered, design_ux, feasibility, each 1-10 as your honest judgment). " +
           "Every zone rationale MUST reference something specific from the brief - no generic rationale. " +
           `Respond with ONLY a valid JSON array of ${numConcepts} concept objects, no markdown fences.` + checklistPrompt("CPT") + (locationCtx ? `\n\nRESEARCHED LOCAL CONTEXT for ${projectLocation} - use this so concepts respond to real local practice, and say in a zone rationale where a concept follows or deliberately departs from it:\n${locationCtx}` : "") + `\n\nSITE ANALYSIS & PROGRAM BRIEF:\n${brief}`,
       });
@@ -182,7 +183,14 @@ export default function ConceptGenerator() {
       lines.push(`CONCEPT ${i + 1}: ${c.name}`, c.vision, "");
       (c.zones || []).forEach((z) => lines.push(`  - ${z.name} (${z.position}, ~${z.area_pct}%): ${z.rationale}`));
       lines.push("  Scores: " + SCORE_CRITERIA.map((sc) => `${sc.label}=${c.scores?.[sc.id] ?? "-"}`).join(", "), `  Overall: ${overallScore(c)}/10`, "");
-      const fac = (c.zones || []).flatMap((z) => (z.facilities || []).map((f) => `${f} (${z.name}${siteAreaM2 ? `, ~${Math.round((Number(z.area_pct)||0)/100*Number(siteAreaM2)).toLocaleString()} m2 zone` : ""})`));
+      // Facilities may arrive as {name, area_m2} (current) or as plain strings
+      // (older runs). Handle both, and always state the area if one exists.
+      const facName = (f) => (typeof f === "string" ? f : (f && f.name) || "");
+      const facArea = (f) => (typeof f === "string" ? 0 : Number(f && f.area_m2) || 0);
+      const fac = (c.zones || []).flatMap((z) => (z.facilities || []).map((f) => {
+        const a = facArea(f);
+        return `${facName(f)}${a ? ` - ${a.toLocaleString()} m2` : " - AREA NOT STATED"} (${z.name})`;
+      }));
       if (fac.length) { lines.push("  FACILITY SCHEDULE (for cost estimating):"); fac.forEach((f) => lines.push(`    - ${f}`)); lines.push(""); }
     });
     if (recommendation) {
@@ -227,7 +235,12 @@ export default function ConceptGenerator() {
               z.rationale || "-",
             ]),
           });
-          const fac = (c.zones || []).flatMap((z) => (z.facilities || []).map((x) => `${x} (${z.name})`));
+          const fName = (f) => (typeof f === "string" ? f : (f && f.name) || "");
+          const fArea = (f) => (typeof f === "string" ? 0 : Number(f && f.area_m2) || 0);
+          const fac = (c.zones || []).flatMap((z) => (z.facilities || []).map((x) => {
+            const a = fArea(x);
+            return `${fName(x)}${a ? ` - ${a.toLocaleString()} m2` : " - AREA NOT STATED"} (${z.name})`;
+          }));
           if (fac.length) F.push({ title: `${c.name || `Concept ${i + 1}`} - facility schedule for cost estimating`, items: fac });
         });
         return F.length ? F : [{ title: "Analysis output", text: buildReportText() }];

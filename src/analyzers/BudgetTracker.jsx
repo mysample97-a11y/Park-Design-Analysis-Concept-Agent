@@ -67,19 +67,35 @@ export default function BudgetTracker() {
         provider, apiKey, maxTokens: 2500,
         content:
           "Extract EVERY built facility or zone from this park programme. Do not summarise, do not merge similar " +
-          "items, and do not stop early - if the text lists ten zones, return ten. For each output " +
-          '{name, area (number in square metres; estimate if not stated), category}. ' +
+          "items, and do not stop early - if the text lists ten zones, return ten. Every entry MUST have a numeric " +
+          "area in square metres: if a facility has no stated area but its zone does, apportion the zone area across " +
+          "its facilities; if only zone areas exist, return one entry per zone. " +
+          'For each output {name, area (number, m2), category, concept (the name of the concept it belongs to, or "" if the text describes only one)}. ' +
           "Respond with ONLY a valid JSON array, no markdown fences.\n\n" +
           (detectedConcepts.length > 1
-            ? "NOTE: this text contains " + detectedConcepts.length + " separate concepts. Extract the facilities of " +
-              "the FIRST concept only (" + detectedConcepts[0].label + "), because a cost schedule describes one scheme. " +
-              "Use the concept comparison below to cost the others.\n\n"
+            ? "NOTE: this text contains " + detectedConcepts.length + " concepts (" +
+              detectedConcepts.map((c) => c.label).join(", ") + "). Return the facilities of ALL of them, " +
+              "each tagged with its concept, so the full programme is visible.\n\n"
             : "") +
-          "DESCRIPTION:\n" + (detectedConcepts.length > 1 ? detectedConcepts[0].text : pasteText),
+          "DESCRIPTION:\n" + pasteText,
       });
       const parsed = extractJSON(text);
       if (!Array.isArray(parsed)) throw new Error("Expected a list of facilities.");
-      setFacilities(parsed.map((f) => ({ id: uid(), name: f.name || "", area: f.area || "", rate: "", category: f.category || "" })));
+      const rows = parsed.map((f) => ({
+        id: uid(), name: f.name || "", area: f.area || "", rate: "",
+        category: f.category || "", concept: f.concept || "",
+      }));
+      setFacilities(rows);
+      const noArea = rows.filter((r) => !(Number(r.area) > 0)).length;
+      const byConcept = {};
+      rows.forEach((r) => { const k = r.concept || "(single concept)"; byConcept[k] = (byConcept[k] || 0) + 1; });
+      const breakdown = Object.keys(byConcept).map((k) => `${k}: ${byConcept[k]}`).join(" · ");
+      setDetectError(
+        `${rows.length} facilities read` + (breakdown ? ` (${breakdown})` : "") +
+        (noArea ? `. ${noArea} have no area and will not cost - fill them in or re-run the Concept Generator, which now emits facility areas.` : ". All carry an area.") +
+        (Object.keys(byConcept).length > 1
+          ? " Costing all concepts together would be meaningless, so use the 'Use <concept> as the facility schedule' buttons below to cost one at a time."
+          : ""));
       setDetectError(detectedConcepts.length > 1
         ? `${parsed.length} facilities read from ${detectedConcepts[0].label}. The other ${detectedConcepts.length - 1} concept(s) are costed separately in the comparison below.`
         : `${parsed.length} facilities read. Check none are missing before researching rates.`);
@@ -189,8 +205,12 @@ export default function BudgetTracker() {
             '"bottlenecks":["cost or delivery risks specific to this concept"],' +
             '"opportunities":["what could be added or improved if budget allows"],' +
             '"facilities":[{"facility":"","area_m2":0,"rate_per_m2":0}]}\n' +
-            "Every facility must carry a positive area_m2 and rate_per_m2. Mark any rate you could not source " +
-            "against a published benchmark as Assumption-Flagged.\n\n" +
+            "Every facility MUST carry a positive area_m2 and rate_per_m2 - a facility without both cannot be costed " +
+            "and will be discarded. If the text lists facilities WITHOUT their own areas but DOES give zone areas " +
+            "(as a percentage of site area or in m2), apportion each zone's area across the facilities it contains " +
+            "and say so. If neither is given, use the zone schedule itself as the facility list, one row per zone, " +
+            "with that zone's area. Never return a facility with a zero or missing area. " +
+            "Mark any rate you could not source against a published benchmark as Assumption-Flagged.\n\n" +
             `LOCATION: ${location || "(not stated)"}\nCURRENCY: ${currency}\n\n${x.label}:\n${x.t}`,
         });
         const p = extractJSON(one) || {};
@@ -651,7 +671,15 @@ export default function BudgetTracker() {
           {facilities.map((f) => (
             <div key={f.id} className="flex gap-2 items-center text-sm">
               <input value={f.name} onChange={(e) => updateFacility(f.id, { name: e.target.value })} placeholder="Name" className="flex-1 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 focus:border-brand-gold outline-none" />
-              <input type="number" value={f.area} onChange={(e) => updateFacility(f.id, { area: e.target.value })} placeholder="m2" className="w-24 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 font-mono focus:border-brand-gold outline-none" />
+              {/* Which concept this facility came from. Without it a schedule
+                  assembled from several concepts is indistinguishable from one
+                  describing a single scheme - the failure in AS2P-BDG-003-P01. */}
+              {facilities.some((x) => x.concept) && (
+                <span className="w-32 text-[10px] text-brand-muted truncate" title={f.concept || ""}>{f.concept || "-"}</span>
+              )}
+              <input type="number" value={f.area} onChange={(e) => updateFacility(f.id, { area: e.target.value })} placeholder="m2"
+                className={"w-24 bg-[#F7F5F1] border rounded px-2 py-1.5 font-mono outline-none focus:border-brand-gold " +
+                  (f.name.trim() && !(Number(f.area) > 0) ? "border-brand-danger" : "border-brand-border")} />
               <input type="number" value={f.rate} onChange={(e) => updateFacility(f.id, { rate: e.target.value })} placeholder="/m2" className="w-28 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 font-mono focus:border-brand-gold outline-none" />
               <span className="w-28 text-right font-mono text-xs">{formatNumber((Number(f.area) || 0) * (Number(f.rate) || 0))}</span>
               <button onClick={() => removeFacility(f.id)} className="text-brand-text/40 hover:text-brand-danger w-6"><Trash2 size={14} /></button>
