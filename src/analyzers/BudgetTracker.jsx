@@ -65,11 +65,24 @@ export default function BudgetTracker() {
     try {
       const text = await callAI({
         provider, apiKey, maxTokens: 2500,
-        content: "Extract a list of built facilities/zones from this park program description. For each, output {name, area (number in square meters, estimate if not stated but mark estimated), category}. Respond with ONLY a valid JSON array, no markdown fences.\n\nDESCRIPTION:\n" + pasteText,
+        content:
+          "Extract EVERY built facility or zone from this park programme. Do not summarise, do not merge similar " +
+          "items, and do not stop early - if the text lists ten zones, return ten. For each output " +
+          '{name, area (number in square metres; estimate if not stated), category}. ' +
+          "Respond with ONLY a valid JSON array, no markdown fences.\n\n" +
+          (detectedConcepts.length > 1
+            ? "NOTE: this text contains " + detectedConcepts.length + " separate concepts. Extract the facilities of " +
+              "the FIRST concept only (" + detectedConcepts[0].label + "), because a cost schedule describes one scheme. " +
+              "Use the concept comparison below to cost the others.\n\n"
+            : "") +
+          "DESCRIPTION:\n" + (detectedConcepts.length > 1 ? detectedConcepts[0].text : pasteText),
       });
       const parsed = extractJSON(text);
       if (!Array.isArray(parsed)) throw new Error("Expected a list of facilities.");
       setFacilities(parsed.map((f) => ({ id: uid(), name: f.name || "", area: f.area || "", rate: "", category: f.category || "" })));
+      setDetectError(detectedConcepts.length > 1
+        ? `${parsed.length} facilities read from ${detectedConcepts[0].label}. The other ${detectedConcepts.length - 1} concept(s) are costed separately in the comparison below.`
+        : `${parsed.length} facilities read. Check none are missing before researching rates.`);
     } catch (e) {
       setDetectError(e.message || "Could not detect facilities. Try again or enter them manually.");
     } finally {
@@ -201,12 +214,17 @@ export default function BudgetTracker() {
 
         const construction = facs.reduce((a, x2) => a + x2.subtotal, 0);
         if (construction > 0) {
-          const prelim = construction * (Number(rates.preliminaries) || 0) / 100;
-          const ohp = (construction + prelim) * (Number(rates.ohp) || 0) / 100;
-          const cont = (construction + prelim + ohp) * (Number(rates.contingency) || 0) / 100;
-          const infl = (construction + prelim + ohp + cont) * (Number(rates.inflation) || 0) / 100;
+          // rates.<key> is an OBJECT { pct, base, confidence } - not a number.
+          // Reading it as a number gave NaN, and the `|| 0` fallback silently
+          // zeroed every wrapper, so CAPEX came out equal to the construction
+          // subtotal. Same accessor as the main estimate at section 6.2.
+          const pct = (k) => Number(rates[k] && rates[k].pct) || 0;
+          const prelim = construction * pct("preliminaries") / 100;
+          const ohp = (construction + prelim) * pct("ohp") / 100;
+          const cont = (construction + prelim + ohp) * pct("contingency") / 100;
+          const infl = (construction + prelim + ohp + cont) * pct("inflation") / 100;
           const capex = construction + prelim + ohp + cont + infl;
-          const opex = capex * (Number(rates.opex) || 0) / 100;
+          const opex = capex * pct("opex") / 100;
           const cap = Number(budgetCap) || 0;
           const driver = facs.slice().sort((a, b) => b.subtotal - a.subtotal)[0];
           costed.push({
@@ -384,6 +402,24 @@ export default function BudgetTracker() {
    * the user pick: one concept -> estimate plus a direct conclusion; several ->
    * cost each, compare, recommend the best, and say what the budget headroom allows.
    */
+  /**
+   * Replace the facility schedule with the facilities of a costed concept.
+   * Without this the headline estimate in 6.2 stays bound to whatever was
+   * auto-detected first, which is how a report came to cost one scheme while
+   * recommending another.
+   */
+  function loadConceptIntoSchedule(conceptName) {
+    const c = (comparison && comparison.concepts || []).find((x) => x.name === conceptName);
+    if (!c || !(c.facilities || []).length) return;
+    setFacilities(c.facilities.map((f) => ({
+      id: uid(), name: f.facility || "", area: String(f.area_m2 || ""),
+      rate: String(f.rate_per_m2 || ""), category: "",
+      rateBasis: "from costed concept: " + c.name,
+      rateConfidence: c.confidence || "Assumption-Flagged",
+    })));
+    setDetectError("Facility schedule replaced with " + c.name + ". Sections 6.1 and 6.2 now describe that concept.");
+  }
+
   async function generateInsight() {
     // Multiple concepts detected: run the comparison path instead, then continue
     // into the single-estimate insight so both sections are populated.
@@ -485,6 +521,7 @@ export default function BudgetTracker() {
               return [];
             })()
           : []),
+        ...(compareWarning ? [{ title: "WARNING - the comparison below is incomplete", text: compareWarning }] : []),
         ...(comparison ? [{ title: "Concept cost comparison - full cascade per concept",
           note: "Each concept was costed separately using the same RICS NRM1 cascade and the same wrapper percentages as section 6.2. The cascade is computed deterministically from facility areas and rates - only the facility schedule and unit rates are AI-derived. Concepts are compared on value for money rather than lowest cost.",
           headers: ["Concept", "Construction", "Prelims", "OH&P", "Contingency", "Inflation", `CAPEX ${currency}`, "Annual OPEX"],
@@ -682,7 +719,13 @@ export default function BudgetTracker() {
       <div className="card p-4">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
           <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h3>
-          <button onClick={generateInsight} disabled={insightLoading || !apiKey} className="btn-dark"><Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}</button>
+          <button onClick={generateInsight} disabled={insightLoading || comparing || !apiKey}
+            className="btn-dark disabled:opacity-60 disabled:cursor-not-allowed">
+            {insightLoading || comparing
+              ? <span className="inline-block w-[15px] h-[15px] border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : <Sparkles size={15} />}
+            {insightLoading || comparing ? "Working - do not navigate away" : "Generate AI Insight"}
+          </button>
         </div>
         {insightLoading && <p className="text-sm text-brand-text">Reviewing cost build-up...</p>}
         {insightError && (<div className="space-y-1"><p className="text-sm text-brand-dark flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
@@ -733,7 +776,17 @@ export default function BudgetTracker() {
             </div>
           )}
           {compareError && <p className="text-xs text-brand-danger">{friendlyError(compareError)}</p>}
-          {comparison && (
+          {comparison && (comparison.concepts || []).length > 0 && (
+        <div className="px-4 pb-3 flex flex-wrap gap-2">
+          {(comparison.concepts || []).map((c) => (
+            <button key={c.name} onClick={() => loadConceptIntoSchedule(c.name)}
+              className="text-[11px] font-semibold px-3 py-2 rounded-md border border-[#DDD6C9] hover:border-[#C9A46A]">
+              Use {c.name} as the facility schedule
+            </button>
+          ))}
+        </div>
+      )}
+      {comparison && (
             <div className="space-y-3">
               <table className="w-full text-xs">
                 <thead><tr className="text-left text-brand-text/60 border-b border-brand-border">

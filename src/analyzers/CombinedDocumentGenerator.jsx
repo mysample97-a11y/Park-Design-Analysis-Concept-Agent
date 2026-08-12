@@ -280,7 +280,7 @@ export default function CombinedDocumentGenerator() {
 
       <div className="bg-brand-warm border border-brand-border rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />
-        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: v9-local-cascade]</p>
+        <p className="text-sm text-brand-text"><span className="font-semibold">MVP/Prototype tool.</span> All content comes from your inputs. Sections 1-4 need real content from your other tools. Each section accepts any report this suite exports - .xlsx, .rtf, .pdf - plus .docx, .txt, .csv and .md. All read locally in your browser: all providers, no API key needed. Scanned PDFs with no text layer are read as page images when an API key is set. [build: v10-rates-fix]</p>
       </div>
 
       <div className="card">
