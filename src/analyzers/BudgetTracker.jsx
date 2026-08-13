@@ -203,7 +203,6 @@ export default function BudgetTracker() {
   // Which concept the headline estimate describes. Defaults to the first found.
   // Replaces the old "load this concept into the schedule" round trip - the
   // schedule holds every concept, and this simply chooses which one is totalled.
-  const [activeConcept, setActiveConcept] = useState("");
   const [compareError, setCompareError] = useState("");
 
 
@@ -354,29 +353,33 @@ export default function BudgetTracker() {
         facility_count: (c.facilities || []).length,
       }));
       const text = await callAI({
-        provider, apiKey, maxTokens: 1600,
+        provider, apiKey, maxTokens: 3000,
         content:
-          "These park concepts have ALREADY been costed - do not recost them and do not restate the numbers as if " +
-          "you calculated them. Compare them on VALUE FOR MONEY, not lowest cost. Return ONLY valid JSON, no fences:\n" +
-          '{"recommended":"the exact concept name",' +
-          '"recommendation_reason":"4-6 sentences: why this is the best value, how it is feasible within the cap, ' +
-          'what the runner-up would have offered, and the principal bottlenecks that could still move the number",' +
-          '"per_concept":[{"name":"","verdict":"Deliverable|Marginal|Over budget","bottlenecks":[""],"opportunities":[""]}],' +
-          '"optimisations":[""]}\n' +
-          "For optimisations: if the recommended concept sits under the cap, propose specific things that could be " +
-          "ADDED with the headroom, each with an approximate cost. If it sits over, propose reductions with " +
-          "approximate savings.\n\n" +
+          "These park concepts have ALREADY been costed - do not recost them. Compare on VALUE FOR MONEY, not " +
+          "lowest cost. Return ONLY valid JSON, no fences, with the SHORT FIELDS FIRST so a truncated reply still " +
+          "carries the recommendation:\n" +
+          '{"recommended":"exact concept name","recommendation_reason":"3-4 sentences",' +
+          '"per_concept":[{"name":"","verdict":"Deliverable|Marginal|Over budget","bottlenecks":["max 2, short"],"opportunities":["max 2, short"]}],' +
+          '"optimisations":["max 3, each with an approximate cost or saving"]}\n' +
+          "Keep every string short. If the recommended concept is under the cap, optimisations are things to ADD " +
+          "with the headroom; if over, they are reductions.\n\n" +
           `CURRENCY: ${currency}\nBUDGET CAP: ${budgetCap || "(none stated)"}\n\nCOSTED CONCEPTS:\n` +
-          JSON.stringify(brief, null, 2),
+          JSON.stringify(brief),
       });
-      const parsed = extractJSON(text);
-      if (!parsed) throw new Error(
-        "The reply could not be read as structured data. Press Compare again.");
+      // Accept a PARTIAL reply. extractJSON already repairs truncation; if the
+      // recommendation survived but the per-concept detail did not, that is still
+      // a usable comparison and far better than discarding the whole call.
+      const parsed = extractJSON(text) || {};
+      if (!parsed.recommended && !(parsed.per_concept || []).length) throw new Error(
+        "The reply carried no recommendation. Press Compare again - if it repeats, reduce the number of concepts.");
 
       // Merge the model's judgment onto the calculated figures. The numbers stay
       // ours; only the reasoning comes from the model.
       const byName = {};
       (parsed.per_concept || []).forEach((p) => { byName[String(p.name || "").toLowerCase()] = p; });
+      if (parsed.recommended && !(parsed.per_concept || []).length) setCompareWarning(
+        "The recommendation was returned but the per-concept detail was cut off. Verdicts below are derived from " +
+        "the calculated figures rather than the model's commentary.");
       setComparison({
         recommended: parsed.recommended || "",
         recommendation_reason: parsed.recommendation_reason || "",
@@ -528,8 +531,13 @@ export default function BudgetTracker() {
   const scheduleConcepts = Array.from(new Set(
     facilities.filter((f) => f.name.trim() && f.concept).map((f) => f.concept)));
   const mixedSchedule = scheduleConcepts.length > 1;
+  // No concept toggle. Every concept is calculated and compared in its own right
+  // below; this only decides which one the headline build-up in 6.1/6.2 describes,
+  // and it follows the comparison's recommendation once one exists.
   const shownConcept = mixedSchedule
-    ? (scheduleConcepts.indexOf(activeConcept) >= 0 ? activeConcept : scheduleConcepts[0])
+    ? ((comparison && scheduleConcepts.indexOf(comparison.recommended) >= 0)
+        ? comparison.recommended
+        : scheduleConcepts[0])
     : "";
   const costedFacilities = mixedSchedule
     ? facilities.filter((f) => f.concept === shownConcept)
@@ -585,7 +593,12 @@ export default function BudgetTracker() {
     // fire five or more calls and exhaust a free key in one analysis.
     setInsightLoading(true); setInsight(null); setInsightError("");
     const summary = {
-      facilities: costedFacilities.filter((f) => f.name.trim()).map((f) => ({ name: f.name, area_m2: f.area, rate_per_m2: f.rate, subtotal: (Number(f.area) || 0) * (Number(f.rate) || 0) })),
+      // Top ten by subtotal only - the insight reasons about drivers, and sending
+      // every line item was a second source of overflow.
+      facilities: costedFacilities.filter((f) => f.name.trim())
+        .map((f) => ({ name: f.name, area_m2: Number(f.area) || 0, rate_per_m2: Number(f.rate) || 0, subtotal: (Number(f.area) || 0) * (Number(f.rate) || 0) }))
+        .sort((a, b) => b.subtotal - a.subtotal).slice(0, 10),
+      facility_count: costedFacilities.filter((f) => f.name.trim()).length,
       construction_subtotal: constructionSubtotal,
       total_capex: totalCapex,
       annual_opex: annualOpex,
@@ -617,7 +630,21 @@ export default function BudgetTracker() {
           checklistPrompt("BDG") + "\n\nMODE: " + (multi ? `comparison of ${detectedConcepts.length} concepts` : "single concept estimate") +
           (cap ? `\nBUDGET CAP: ${formatNumber(cap)} ${currency}` : "") +
           (headroom !== null ? `\nHEADROOM AGAINST BEST CONCEPT: ${formatNumber(headroom)} ${currency}` : "") +
-          (multi && comparison?.concepts ? "\n\nCOSTED CONCEPTS:\n" + JSON.stringify(comparison.concepts, null, 2) : "") +
+          // Summary fields only. This previously sent every concept's FULL facility
+          // array - thirty-plus objects with rates, bases and confidence bands -
+          // which crowded out the reply and produced "could not be read as
+          // structured data". The insight needs the totals, not the line items.
+          (multi && comparison?.concepts
+            ? "\n\nCOSTED CONCEPTS (summary only):\n" + JSON.stringify(
+                comparison.concepts.map((c) => ({
+                  name: c.name,
+                  capex: Math.round(c.estimated_capex),
+                  opex: Math.round(c.annual_opex),
+                  area_m2: c.total_area_m2,
+                  driver: c.largest_cost_driver,
+                  within_budget: c.within_budget,
+                })))
+            : "") +
           "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
       // extractJSON returns NULL on an unrecoverable reply - it does not throw.
@@ -846,37 +873,48 @@ export default function BudgetTracker() {
         </div>
       )}
       <div className="card-header flex items-center justify-between">
-          <span>Facilities{mixedSchedule ? " - all concepts listed" : ""}</span>
-          {mixedSchedule && (
-            <span className="flex items-center gap-2 text-[11px] font-normal">
-              Headline estimate covers:
-              <select value={shownConcept} onChange={(e) => setActiveConcept(e.target.value)}
-                className="bg-[#F7F5F1] border border-brand-border rounded px-2 py-1 outline-none">
-                {scheduleConcepts.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </span>
-          )}
+          <span>Facilities{mixedSchedule ? ` - ${scheduleConcepts.length} concepts, listed separately below` : ""}</span>
           <button onClick={addFacility} className="btn-gold text-xs px-3 py-1.5"><Plus size={13} /> Add</button>
         </div>
         <div className="p-4 space-y-2">
           <div className="flex gap-2 text-[10px] uppercase tracking-wide text-brand-text/60 px-1"><span className="flex-1">Facility</span><span className="w-24">Area m2</span><span className="w-28">Rate /m2</span><span className="w-28 text-right">Subtotal</span><span className="w-6" /></div>
-          {facilities.map((f) => (
-            <div key={f.id} className="flex gap-2 items-center text-sm">
-              <input value={f.name} onChange={(e) => updateFacility(f.id, { name: e.target.value })} placeholder="Name" className="flex-1 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 focus:border-brand-gold outline-none" />
-              {/* Which concept this facility came from. Without it a schedule
-                  assembled from several concepts is indistinguishable from one
-                  describing a single scheme - the failure in AS2P-BDG-003-P01. */}
-              {facilities.some((x) => x.concept) && (
-                <span className="w-32 text-[10px] text-brand-muted truncate" title={f.concept || ""}>{f.concept || "-"}</span>
-              )}
-              <input type="number" value={f.area} onChange={(e) => updateFacility(f.id, { area: e.target.value })} placeholder="m2"
-                className={"w-24 bg-[#F7F5F1] border rounded px-2 py-1.5 font-mono outline-none focus:border-brand-gold " +
-                  (f.name.trim() && !(Number(f.area) > 0) ? "border-brand-danger" : "border-brand-border")} />
-              <input type="number" value={f.rate} onChange={(e) => updateFacility(f.id, { rate: e.target.value })} placeholder="/m2" className="w-28 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 font-mono focus:border-brand-gold outline-none" />
-              <span className="w-28 text-right font-mono text-xs">{formatNumber((Number(f.area) || 0) * (Number(f.rate) || 0))}</span>
-              <button onClick={() => removeFacility(f.id)} className="text-brand-text/40 hover:text-brand-danger w-6"><Trash2 size={14} /></button>
-            </div>
-          ))}
+          {(mixedSchedule ? scheduleConcepts : [""]).map((grp) => {
+            const list = mixedSchedule ? facilities.filter((f) => f.concept === grp) : facilities;
+            const area = list.reduce((a, f) => a + (Number(f.area) || 0), 0);
+            const sub = list.reduce((a, f) => a + (Number(f.area) || 0) * (Number(f.rate) || 0), 0);
+            return (
+              <div key={grp || "single"} className={mixedSchedule ? "rounded-md border border-brand-border p-2 mb-3" : ""}>
+                {mixedSchedule && (
+                  <div className="flex justify-between items-baseline mb-2 px-1">
+                    <span className="text-[11px] font-semibold text-brand-dark">{grp}</span>
+                    <span className="text-[10px] text-brand-muted">
+                      {list.length} items · {formatNumber(area)} m2 · {formatNumber(sub)} {currency}
+                      {grp === shownConcept ? " · costed in 6.1/6.2" : ""}
+                    </span>
+                  </div>
+                )}
+                <div className="space-y-2">
+              {list.map((f) => (
+                <div key={f.id} className="flex gap-2 items-center text-sm">
+                  <input value={f.name} onChange={(e) => updateFacility(f.id, { name: e.target.value })} placeholder="Name" className="flex-1 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 focus:border-brand-gold outline-none" />
+                  {/* Which concept this facility came from. Without it a schedule
+                      assembled from several concepts is indistinguishable from one
+                      describing a single scheme - the failure in AS2P-BDG-003-P01. */}
+                  {facilities.some((x) => x.concept) && (
+                    <span className="w-32 text-[10px] text-brand-muted truncate" title={f.concept || ""}>{f.concept || "-"}</span>
+                  )}
+                  <input type="number" value={f.area} onChange={(e) => updateFacility(f.id, { area: e.target.value })} placeholder="m2"
+                    className={"w-24 bg-[#F7F5F1] border rounded px-2 py-1.5 font-mono outline-none focus:border-brand-gold " +
+                      (f.name.trim() && !(Number(f.area) > 0) ? "border-brand-danger" : "border-brand-border")} />
+                  <input type="number" value={f.rate} onChange={(e) => updateFacility(f.id, { rate: e.target.value })} placeholder="/m2" className="w-28 bg-[#F7F5F1] border border-brand-border rounded px-2 py-1.5 font-mono focus:border-brand-gold outline-none" />
+                  <span className="w-28 text-right font-mono text-xs">{formatNumber((Number(f.area) || 0) * (Number(f.rate) || 0))}</span>
+                  <button onClick={() => removeFacility(f.id)} className="text-brand-text/40 hover:text-brand-danger w-6"><Trash2 size={14} /></button>
+                </div>
+              ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
