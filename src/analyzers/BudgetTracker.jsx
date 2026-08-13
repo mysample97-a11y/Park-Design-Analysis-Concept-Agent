@@ -49,6 +49,19 @@ export default function BudgetTracker() {
   const [researchError, setResearchError] = useState("");
   const [budgetCap, setBudgetCap] = useState("");
   const [detecting, setDetecting] = useState(false);
+
+  // How many concepts the pasted text contains. "auto" lets the splitter decide.
+  const [conceptCount, setConceptCount] = useState("auto");
+  const [compareWarning, setCompareWarning] = useState("");
+
+  // Total site area, needed to turn a zone percentage into m2. Read from the
+  // project's site description (e.g. "15000sq.m") so it needs no extra input,
+  // with the competition site area as the fallback.
+  const siteAreaM2 = (function () {
+    const m = String((meta && meta.siteDescription) || "").match(/([\d,]{3,})\s*(?:sq\.?\s*m|m2|m\u00b2|square\s*met)/i);
+    const v = m ? Number(m[1].replace(/,/g, "")) : 0;
+    return v > 0 ? v : 15000;
+  })();
   const [detectError, setDetectError] = useState("");
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
@@ -60,42 +73,69 @@ export default function BudgetTracker() {
   function updateRate(key, patch) { setRates({ ...rates, [key]: { ...rates[key], ...patch } }); }
 
   async function autoDetect() {
-    if (!pasteText.trim()) { setDetectError("Paste a facility/program description first."); return; }
+    if (!pasteText.trim()) { setDetectError("Paste or upload the concept text first."); return; }
     setDetecting(true); setDetectError("");
     try {
+      // ── DETERMINISTIC FIRST ─────────────────────────────────────────────
+      // Read the schedule straight out of the text, per concept. This was a
+      // single AI call asking for every facility across every concept in one
+      // JSON reply - around forty objects. It truncated, the repair salvaged
+      // whatever had parsed, and one facility came back. The model was not at
+      // fault: it was asked for more than one reply could hold, to extract data
+      // that is already machine-readable. This is the same extractor the concept
+      // comparison uses, so the two can no longer disagree.
+      const rows = [];
+      const perConcept = {};
+      detectedConcepts.forEach((c) => {
+        const found = extractScheduleFromText(c.text, siteAreaM2);
+        perConcept[c.label] = found.length;
+        found.forEach((ff) => rows.push({
+          id: uid(), name: ff.facility, area: String(ff.area_m2), rate: "",
+          category: "", concept: detectedConcepts.length > 1 ? c.label : "",
+        }));
+      });
+
+      if (rows.length) {
+        setFacilities(rows);
+        const breakdown = Object.keys(perConcept).map((k) => `${k}: ${perConcept[k]}`).join(" · ");
+        setDetectError(
+          `${rows.length} facilities/zones read directly from the text` +
+          (breakdown && detectedConcepts.length > 1 ? ` (${breakdown})` : "") +
+          ". All carry an area. No AI call was needed - this extraction is deterministic and repeatable." +
+          (detectedConcepts.length > 1
+            ? " Use the 'Use <concept> as the facility schedule' buttons below to cost one concept at a time."
+            : ""));
+        return;
+      }
+
+      // ── AI FALLBACK ─────────────────────────────────────────────────────
+      // Only when the text carries no recognisable schedule - free prose, or a
+      // description the user wrote themselves. Scoped to ONE concept so the
+      // reply cannot overflow.
+      const scope = detectedConcepts.length > 1 ? detectedConcepts[0] : { label: "", text: pasteText };
       const text = await callAI({
         provider, apiKey, maxTokens: 2500,
         content:
           "Extract EVERY built facility or zone from this park programme. Do not summarise, do not merge similar " +
-          "items, and do not stop early - if the text lists ten zones, return ten. Every entry MUST have a numeric " +
-          "area in square metres: if a facility has no stated area but its zone does, apportion the zone area across " +
-          "its facilities; if only zone areas exist, return one entry per zone. " +
-          'For each output {name, area (number, m2), category, concept (the name of the concept it belongs to, or "" if the text describes only one)}. ' +
-          "Respond with ONLY a valid JSON array, no markdown fences.\n\n" +
-          (detectedConcepts.length > 1
-            ? "NOTE: this text contains " + detectedConcepts.length + " concepts (" +
-              detectedConcepts.map((c) => c.label).join(", ") + "). Return the facilities of ALL of them, " +
-              "each tagged with its concept, so the full programme is visible.\n\n"
-            : "") +
-          "DESCRIPTION:\n" + pasteText,
+          "items, and do not stop early. Every entry MUST have a numeric area in square metres: if a facility has " +
+          "no stated area but its zone does, apportion the zone area across its facilities; if only zone areas " +
+          "exist, return one entry per zone. " +
+          'For each output {name, area (number, m2), category}. Respond with ONLY a valid JSON array, no fences.\n\n' +
+          "DESCRIPTION:\n" + scope.text,
       });
       const parsed = extractJSON(text);
-      if (!Array.isArray(parsed)) throw new Error("Expected a list of facilities.");
-      const rows = parsed.map((f) => ({
-        id: uid(), name: f.name || "", area: f.area || "", rate: "",
-        category: f.category || "", concept: f.concept || "",
-      }));
-      setFacilities(rows);
-      const noArea = rows.filter((r) => !(Number(r.area) > 0)).length;
-      const byConcept = {};
-      rows.forEach((r) => { const k = r.concept || "(single concept)"; byConcept[k] = (byConcept[k] || 0) + 1; });
-      const breakdown = Object.keys(byConcept).map((k) => `${k}: ${byConcept[k]}`).join(" · ");
+      if (!parsed || !Array.isArray(parsed) || !parsed.length) throw new Error(
+        "No facilities or zones with areas could be found in this text. Check you pasted the concept report " +
+        "rather than a summary - the zone schedule or facility schedule is what carries the areas.");
+      setFacilities(parsed.map((ff) => ({
+        id: uid(), name: ff.name || "", area: ff.area || "", rate: "",
+        category: ff.category || "", concept: scope.label,
+      })));
+      const noArea = parsed.filter((ff) => !(Number(ff.area) > 0)).length;
       setDetectError(
-        `${rows.length} facilities read` + (breakdown ? ` (${breakdown})` : "") +
-        (noArea ? `. ${noArea} have no area and will not cost - fill them in or re-run the Concept Generator, which now emits facility areas.` : ". All carry an area.") +
-        (Object.keys(byConcept).length > 1
-          ? " Costing all concepts together would be meaningless, so use the 'Use <concept> as the facility schedule' buttons below to cost one at a time."
-          : ""));
+        `${parsed.length} facilities read by AI from ${scope.label || "the text"} (no machine-readable schedule was found).` +
+        (noArea ? ` ${noArea} have no area and will not cost.` : "") +
+        (detectedConcepts.length > 1 ? " Other concepts are costed separately in the comparison below." : ""));
     } catch (e) {
       setDetectError(e.message || "Could not detect facilities. Try again or enter them manually.");
     } finally {
@@ -103,27 +143,6 @@ export default function BudgetTracker() {
     }
   }
 
-  // ---- Multi-concept comparison ----
-  // How many concepts the pasted text / uploaded report contains. The user declares
-  // it once; the tool splits the single input rather than asking for separate boxes.
-  // "auto" lets the splitter decide from the document's own concept headings.
-  // Total site area, needed to convert a zone percentage into m2. Read from the
-  // project's site description (e.g. "15000sq.m") so it needs no extra input,
-  // with the competition site area as the fallback.
-  const siteAreaM2 = (function () {
-    const m = String((meta && meta.siteDescription) || "").match(/([\d,]{3,})\s*(?:sq\.?\s*m|m2|m\u00b2|square\s*met)/i);
-    const v = m ? Number(m[1].replace(/,/g, "")) : 0;
-    return v > 0 ? v : 15000;
-  })();
-
-  const [conceptCount, setConceptCount] = useState("auto");
-  const [compareWarning, setCompareWarning] = useState("");
-
-  /**
-   * Split one pasted body into N concepts. Reports from the Concept Generator label
-   * concepts as "CONCEPT 1: name" or "6.2 CONCEPT 1: ...", so those headings are the
-   * split points. Falls back to a single concept when no headings are present.
-   */
   function splitConcepts(body) {
     const text = String(body || "").trim();
     if (!text) return [];
