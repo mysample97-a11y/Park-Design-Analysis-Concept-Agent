@@ -96,9 +96,6 @@ export default function BudgetTracker() {
         (Object.keys(byConcept).length > 1
           ? " Costing all concepts together would be meaningless, so use the 'Use <concept> as the facility schedule' buttons below to cost one at a time."
           : ""));
-      setDetectError(detectedConcepts.length > 1
-        ? `${parsed.length} facilities read from ${detectedConcepts[0].label}. The other ${detectedConcepts.length - 1} concept(s) are costed separately in the comparison below.`
-        : `${parsed.length} facilities read. Check none are missing before researching rates.`);
     } catch (e) {
       setDetectError(e.message || "Could not detect facilities. Try again or enter them manually.");
     } finally {
@@ -110,6 +107,15 @@ export default function BudgetTracker() {
   // How many concepts the pasted text / uploaded report contains. The user declares
   // it once; the tool splits the single input rather than asking for separate boxes.
   // "auto" lets the splitter decide from the document's own concept headings.
+  // Total site area, needed to convert a zone percentage into m2. Read from the
+  // project's site description (e.g. "15000sq.m") so it needs no extra input,
+  // with the competition site area as the fallback.
+  const siteAreaM2 = (function () {
+    const m = String((meta && meta.siteDescription) || "").match(/([\d,]{3,})\s*(?:sq\.?\s*m|m2|m\u00b2|square\s*met)/i);
+    const v = m ? Number(m[1].replace(/,/g, "")) : 0;
+    return v > 0 ? v : 15000;
+  })();
+
   const [conceptCount, setConceptCount] = useState("auto");
   const [compareWarning, setCompareWarning] = useState("");
 
@@ -176,6 +182,57 @@ export default function BudgetTracker() {
   const [comparing, setComparing] = useState(false);
   const [compareError, setCompareError] = useState("");
 
+
+  /**
+   * Pull a facility or zone schedule out of concept text WITHOUT an AI call.
+   *
+   * The concept reports emit two shapes, and both are machine-readable:
+   *   facility lines  "- Entry Plaza Horizontal Overhead Canopy - 600 m2 (Zone)"
+   *   zone table rows "Central Microclimate Spine | Center | 25 | 3,750 | ..."
+   *                   "Central Microclimate Spine  Center  25  3,750"
+   *
+   * Asking the model to fall back to zone areas was unreliable - it returned
+   * nothing usable and every concept was rejected. Reading them here makes the
+   * comparison deterministic: if the areas are in the text, they are found.
+   * Returns [] only when the text genuinely contains no areas.
+   */
+  function extractScheduleFromText(txt, siteArea) {
+    const out = [];
+    const seen = {};
+    const push = (name, area) => {
+      const n = String(name || "").replace(/\s+/g, " ").trim();
+      const a = Number(area) || 0;
+      if (!n || n.length < 3 || a <= 0) return;
+      const k = n.toLowerCase();
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ facility: n, area_m2: a });
+    };
+    const num = (x) => Number(String(x).replace(/[, ]/g, "")) || 0;
+
+    // 1. facility schedule lines: "- Name - 600 m2 (Zone)"
+    const reFac = /^[\s\-\u2022]*(.+?)\s+[-\u2013]\s+([\d,]+)\s*m2/gim;
+    let m;
+    while ((m = reFac.exec(txt)) !== null) push(m[1].replace(/^[\s\-\u2022]+/, ""), num(m[2]));
+
+    // 2. zone rows carrying an explicit m2 column
+    const reZoneM2 = /^\s*([A-Za-z][^|\n]{3,60}?)\s*\|\s*(?:N|NE|E|SE|S|SW|W|NW|Center)\s*\|\s*[\d.]+\s*\|\s*([\d,]+)/gim;
+    while ((m = reZoneM2.exec(txt)) !== null) push(m[1], num(m[2]));
+
+    // 3. zone rows with a percentage only - convert against the site area
+    if (siteArea > 0) {
+      const rePct = /^\s*([A-Za-z][^|\n]{3,60}?)\s*\|?\s*(?:N|NE|E|SE|S|SW|W|NW|Center)\s*\|?\s+([\d.]+)\s*%?\s*(?:\||$|\s)/gim;
+      while ((m = rePct.exec(txt)) !== null) {
+        const pct = Number(m[2]);
+        if (pct > 0 && pct <= 100) push(m[1], Math.round((pct / 100) * siteArea));
+      }
+      // bubble-diagram labels: "30% ~4,500 m2" preceded by the zone name
+      const reBubble = /([A-Za-z][A-Za-z0-9&'’,\- ]{3,60}?)\s*(\d{1,3})\s*%\s*~?\s*([\d,]+)\s*m2/gi;
+      while ((m = reBubble.exec(txt)) !== null) push(m[1], num(m[3]));
+    }
+    return out;
+  }
+
   async function compareConcepts() {
     // Sourced from the single paste box, split automatically - no separate boxes.
     const filled = detectedConcepts.map((c, i) => ({ i, t: c.text, label: c.label }));
@@ -223,13 +280,28 @@ export default function BudgetTracker() {
         // the totals were ever written, so every concept came back with no usable
         // figure. Beyond robustness, this is simply the correct division of work:
         // the cascade is arithmetic, and this report claims it as deterministic.
-        const facs = (p.facilities || [])
+        // Deterministic fallback FIRST if the model gave nothing usable.
+        let modelFacs = (p.facilities || [])
           .map((x2) => ({
             facility: String(x2.facility || "").trim(),
             area_m2: Number(x2.area_m2) || 0,
             rate_per_m2: Number(x2.rate_per_m2) || 0,
           }))
           .filter((x2) => x2.facility && x2.area_m2 > 0 && x2.rate_per_m2 > 0);
+        // If the model returned no priced facilities, read the schedule out of the
+        // concept text ourselves and apply the median researched rate, flagged.
+        let facs = modelFacs;
+        let derived = false;
+        if (!facs.length) {
+          const fromText = extractScheduleFromText(x.t, Number(siteAreaM2) || 15000);
+          const known = facilities.map((ff) => Number(ff.rate)).filter((n) => n > 0).sort((a, b) => a - b);
+          const fallbackRate = known.length ? known[Math.floor(known.length / 2)]
+            : (p.facilities || []).map((ff) => Number(ff.rate_per_m2)).filter((n) => n > 0)[0] || 0;
+          if (fromText.length && fallbackRate > 0) {
+            facs = fromText.map((ff) => ({ ...ff, rate_per_m2: fallbackRate }));
+            derived = true;
+          }
+        }
         facs.forEach((x2) => { x2.subtotal = x2.area_m2 * x2.rate_per_m2; });
 
         const construction = facs.reduce((a, x2) => a + x2.subtotal, 0);
@@ -258,9 +330,10 @@ export default function BudgetTracker() {
             driver_share_pct: driver ? Math.round((driver.subtotal / construction) * 100) : 0,
             within_budget: cap ? capex <= cap : null,
             total_area_m2: facs.reduce((a, x2) => a + x2.area_m2, 0),
+            rate_derived: derived,
           });
         } else {
-          rejected.push(x.label + " - no facilities with both an area and a rate were returned");
+          rejected.push(x.label + " - no facilities or zones with an area could be found in the text for this concept");
         }
       }
       if (!costed.length) throw new Error(
@@ -387,9 +460,25 @@ export default function BudgetTracker() {
       // Shared reader. The old code read only the FIRST sheet of a workbook - but the
       // reports this suite exports carry eleven sheets, so the facility schedule was
       // silently missed. It also could not read PDF at all.
-      const res = await readExportFile(file, undefined, readScannedPages);
-      const text = res.digest || res.text;
+      setDetectError("Reading " + file.name + "...");
+      const res = await readExportFile(file,
+        (p, total) => setDetectError(`Reading page ${p} of ${total} of ${file.name}...`),
+        readScannedPages);
+
+      // Prefer the FULL text over the digest here. The digest drops section 7,
+      // and on a Concept Options Report that is where the bubble-diagram area
+      // labels live - the very numbers this tool needs. A digest that has lost
+      // the areas is worse than raw text for costing.
+      const hasAreas = (t) => /\d[\d,]*\s*m2/i.test(String(t || ""));
+      const text = hasAreas(res.text) ? res.text : (res.digest || res.text);
+
       setPasteText((prev) => (prev ? prev + "\n\n" : "") + text);
+      const found = extractScheduleFromText(text, Number(siteAreaM2) || 15000);
+      setDetectError(
+        `${file.name}: ${res.note} ` +
+        (found.length
+          ? `${found.length} facilities/zones with areas found in the text.`
+          : "No areas were found in this file - check it is the concept or facility report, not a summary."));
     } catch (err) {
       setDetectError(err.message || "Could not read this file.");
     } finally { e.target.value = ""; }
@@ -547,6 +636,29 @@ export default function BudgetTracker() {
             })()
           : []),
         ...(compareWarning ? [{ title: "WARNING - the comparison below is incomplete", text: compareWarning }] : []),
+        // Per-concept, per-facility breakdown. Without it the comparison shows a
+        // CAPEX with no way to check what produced it - the user cannot verify
+        // the AI's arithmetic or adjust a line they disagree with.
+        ...((comparison && (comparison.concepts || []).length)
+          ? (comparison.concepts || []).map((c) => ({
+              title: `Cost breakdown - ${c.name}`,
+              note: (c.rate_derived
+                ? "Facilities and areas were read directly from the concept text; the median researched rate was applied to each and is Assumption-Flagged. "
+                : "Facilities, areas and rates as returned for this concept. ") +
+                `Total area ${formatNumber(c.total_area_m2 || 0)} m2. Construction subtotal ${formatNumber(c.construction_subtotal)} ${currency}.`,
+              headers: ["Facility / zone", "Area m2", `Rate ${currency}/m2`, `Subtotal ${currency}`, "% of construction"],
+              rows: (c.facilities || []).map((x) => [
+                x.facility,
+                formatNumber(x.area_m2),
+                formatNumber(x.rate_per_m2),
+                formatNumber(x.subtotal || x.area_m2 * x.rate_per_m2),
+                c.construction_subtotal ? Math.round(((x.subtotal || x.area_m2 * x.rate_per_m2) / c.construction_subtotal) * 100) + "%" : "-",
+              ]).concat([[
+                "TOTAL", formatNumber(c.total_area_m2 || 0), "",
+                formatNumber(c.construction_subtotal), "100%",
+              ]]),
+            }))
+          : []),
         ...(comparison ? [{ title: "Concept cost comparison - full cascade per concept",
           note: "Each concept was costed separately using the same RICS NRM1 cascade and the same wrapper percentages as section 6.2. The cascade is computed deterministically from facility areas and rates - only the facility schedule and unit rates are AI-derived. Concepts are compared on value for money rather than lowest cost.",
           headers: ["Concept", "Construction", "Prelims", "OH&P", "Contingency", "Inflation", `CAPEX ${currency}`, "Annual OPEX"],
@@ -810,6 +922,49 @@ export default function BudgetTracker() {
           )}
           {compareError && <p className="text-xs text-brand-danger">{friendlyError(compareError)}</p>}
           {comparison && (comparison.concepts || []).length > 0 && (
+        <div className="px-4 pb-2 space-y-3">
+          {(comparison.concepts || []).map((c) => (
+            <details key={"bd-" + c.name} className="rounded-md border border-brand-border">
+              <summary className="px-3 py-2 text-xs font-semibold cursor-pointer">
+                {c.name} - {formatNumber(c.estimated_capex)} {currency} CAPEX
+                <span className="font-normal text-brand-muted"> · {(c.facilities || []).length} items · {formatNumber(c.total_area_m2 || 0)} m2</span>
+              </summary>
+              <div className="px-3 pb-3 overflow-x-auto">
+                {c.rate_derived && (
+                  <p className="text-[10px] text-brand-warning mb-1">
+                    Areas read from the concept text; median researched rate applied and Assumption-Flagged.
+                  </p>
+                )}
+                <table className="w-full text-[11px]">
+                  <thead><tr className="text-brand-muted">
+                    <th className="text-left py-1">Facility / zone</th>
+                    <th className="text-right py-1">Area m2</th>
+                    <th className="text-right py-1">Rate</th>
+                    <th className="text-right py-1">Subtotal</th>
+                  </tr></thead>
+                  <tbody>
+                    {(c.facilities || []).map((x, i) => (
+                      <tr key={i} className="border-t border-brand-border">
+                        <td className="py-1">{x.facility}</td>
+                        <td className="py-1 text-right font-mono">{formatNumber(x.area_m2)}</td>
+                        <td className="py-1 text-right font-mono">{formatNumber(x.rate_per_m2)}</td>
+                        <td className="py-1 text-right font-mono">{formatNumber(x.subtotal || x.area_m2 * x.rate_per_m2)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t-2 border-brand-dark font-semibold">
+                      <td className="py-1">Construction subtotal</td>
+                      <td className="py-1 text-right font-mono">{formatNumber(c.total_area_m2 || 0)}</td>
+                      <td />
+                      <td className="py-1 text-right font-mono">{formatNumber(c.construction_subtotal)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+      {comparison && (comparison.concepts || []).length > 0 && (
         <div className="px-4 pb-3 flex flex-wrap gap-2">
           {(comparison.concepts || []).map((c) => (
             <button key={c.name} onClick={() => loadConceptIntoSchedule(c.name)}
