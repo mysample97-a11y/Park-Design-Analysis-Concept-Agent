@@ -36,32 +36,30 @@ import {
 } from "../utils/tokenMeter";
 
 const PANEL = {
-  // Frosted blue, deliberately darker than the tool surface so the rails read
-  // as instrumentation rather than content, while staying clearly lighter than
-  // the page background so they never disappear into it.
-  background: "rgba(28, 45, 66, 0.94)",
-  border: "1px solid #3A5878",
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-  color: "#D8E4F2",
+  // Matched to the tool shell: near-black surface, cool border, no frosting.
+  // The rails must read as part of the same product as the tools beside them.
+  background: "#121924",
+  border: "1px solid #223043",
   borderRadius: 10,
   padding: "12px 13px",
   fontSize: 12,
   lineHeight: 1.5,
+  color: "#E8EFF7",
 };
 const LABEL = {
   fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase",
-  color: "#93AFCC", marginBottom: 2,
+  color: "#93A6BC", marginBottom: 2,
 };
 const BIG = { fontSize: 19, fontWeight: 700, color: "#FFFFFF" };
-const LEVEL_FG = { low: "#8FD3B0", medium: "#F0CE8E", high: "#F5A493", unknown: "#A9BDD3" };
+const ACCENT = "#FF8A3D";   // orange, used for the single most important number
+const LEVEL_FG = { low: "#8FD3B0", medium: "#F0CE8E", high: "#F5A493", unknown: "#93A6BC" };
 
 function Bar({ used, limit }) {
   if (!limit) return null;
   const pct = Math.min(100, Math.round((used / limit) * 100));
-  const fg = pct >= 90 ? "#F0A48C" : pct >= 70 ? "#E8C98A" : "#6FC49A";
+  const fg = pct >= 90 ? "#F0A48C" : pct >= 70 ? "#E8C98A" : "#4DD091";
   return (
-    <div style={{ height: 5, background: "#26405C", borderRadius: 3, overflow: "hidden", marginTop: 4 }}>
+    <div style={{ height: 5, background: "#0E1520", borderRadius: 3, overflow: "hidden", marginTop: 4 }}>
       <div style={{ width: `${pct}%`, height: "100%", background: fg }} />
     </div>
   );
@@ -90,16 +88,16 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
 
   return (
     <div style={PANEL}>
-      <div style={{ ...LABEL, color: "#BBD2EA", fontSize: 10.5, marginBottom: 8 }}>Budget</div>
+      <div style={{ ...LABEL, color: "#CFE0F2", fontSize: 10.5, marginBottom: 8 }}>Budget</div>
 
       <div style={LABEL}>Requests this minute</div>
       <div style={BIG}>
         {win.lastMinute}
-        {lim.rpm ? <span style={{ fontSize: 12, fontWeight: 400, color: "#93AFCC" }}> / {lim.rpm}</span> : null}
+        {lim.rpm ? <span style={{ fontSize: 12, fontWeight: 400, color: "#93A6BC" }}> / {lim.rpm}</span> : null}
       </div>
       <Bar used={win.lastMinute} limit={lim.rpm} />
       {win.nextMinuteSlotIn > 0 && (
-        <div style={{ fontSize: 10.5, color: "#93AFCC", marginTop: 3 }}>
+        <div style={{ fontSize: 10.5, color: "#93A6BC", marginTop: 3 }}>
           capacity returns in ~{win.nextMinuteSlotIn}s
         </div>
       )}
@@ -109,7 +107,7 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
           <div style={LABEL}>Requests today</div>
           <div style={{ ...BIG, fontSize: 15 }}>
             {win.lastDay}
-            <span style={{ fontSize: 11, fontWeight: 400, color: "#93AFCC" }}> / {lim.rpd}</span>
+            <span style={{ fontSize: 11, fontWeight: 400, color: "#93A6BC" }}> / {lim.rpd}</span>
           </div>
           <Bar used={win.lastDay} limit={lim.rpd} />
         </div>
@@ -118,8 +116,20 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
       <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #3A5878" }}>
         <div style={LABEL}>Estimated next run</div>
         <div style={{ ...BIG, fontSize: 16, color: LEVEL_FG[cap.level] || "#FFF" }}>
-          {est ? "~" + formatTokens(est) : "—"}
+          {est ? (estimate && estimate.exact ? "" : "~") + formatTokens(est) : "—"}
         </div>
+        {estimate && (
+          <div style={{ fontSize: 10.5, color: "#93A6BC", marginTop: 2 }}>
+            {estimate.exact ? "exact " : "~"}{formatTokens(estimate.input)} in ·
+            ~{formatTokens(estimate.output)} out
+            {estimate.exact ? " · counted by provider" : ""}
+          </div>
+        )}
+        {lim.tpm ? (
+          <div style={{ fontSize: 10.5, color: "#93A6BC", marginTop: 4 }}>
+            Token limit {formatTokens(lim.tpm)}/min
+          </div>
+        ) : null}
         {onCalculate && (
           <button
             type="button"
@@ -127,7 +137,7 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
             disabled={calculating}
             style={{
               marginTop: 7, width: "100%", padding: "6px 8px", fontSize: 11,
-              background: calculating ? "#26405C" : "#2E4C6E", color: "#DCE6E0",
+              background: calculating ? "#0E1520" : "#1B2635", color: "#DCE6E0",
               border: "1px solid #4A6E96", borderRadius: 6,
               cursor: calculating ? "default" : "pointer",
             }}
@@ -135,7 +145,7 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
             {calculating ? "Counting…" : "Calculate tokens for my inputs"}
           </button>
         )}
-        <div style={{ fontSize: 10.5, color: LEVEL_FG[cap.level] || "#A9BDD3", marginTop: 7 }}>
+        <div style={{ fontSize: 10.5, color: LEVEL_FG[cap.level] || "#93A6BC", marginTop: 7 }}>
           {cap.message}
         </div>
       </div>
@@ -145,7 +155,7 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
           type="button"
           onClick={() => setOpen((o) => !o)}
           style={{ width: "100%", background: "transparent", border: "none",
-            color: "#93AFCC", fontSize: 10.5, textAlign: "left", cursor: "pointer", padding: 0 }}
+            color: "#93A6BC", fontSize: 10.5, textAlign: "left", cursor: "pointer", padding: 0 }}
         >
           {open ? "▾" : "▸"} {lim.tier === "free" ? "Free tier" : "Paid tier"} · edit limits
         </button>
@@ -157,15 +167,15 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
                   onClick={() => { apply({ tier: t, rpm: null, rpd: null, tpm: null }); setDraft({}); }}
                   style={{ flex: 1, fontSize: 10, padding: "3px 4px", borderRadius: 5,
                     border: "1px solid #3A5878", cursor: "pointer",
-                    background: lim.tier === t ? "#3A5878" : "transparent",
-                    color: lim.tier === t ? "#FFFFFF" : "#93AFCC" }}>
+                    background: lim.tier === t ? "#223043" : "transparent",
+                    color: lim.tier === t ? "#FFFFFF" : "#93A6BC" }}>
                   {t === "free" ? "Free" : "Paid"}
                 </button>
               ))}
             </div>
             {[["rpm", "Req/min"], ["rpd", "Req/day"], ["tpm", "Tok/min"]].map(([k, lbl]) => (
               <label key={k} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                <span style={{ fontSize: 10, color: "#93AFCC", width: 52 }}>{lbl}</span>
+                <span style={{ fontSize: 10, color: "#93A6BC", width: 52 }}>{lbl}</span>
                 <input
                   type="number" min="0"
                   value={draft[k] ?? (lim[k] == null ? "" : String(lim[k]))}
@@ -178,25 +188,30 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
                     setDraft((d) => { const n = { ...d }; delete n[k]; return n; });
                   }}
                   style={{ flex: 1, minWidth: 0, fontSize: 10.5, padding: "3px 5px",
-                    background: "#16273A", color: "#E4EEFA",
+                    background: "#0E1520", color: "#E8EFF7",
                     border: "1px solid #3A5878", borderRadius: 4 }}
                 />
               </label>
             ))}
             <button type="button" onClick={() => { resetRequests(provider); setTick((t) => t + 1); }}
               style={{ marginTop: 4, width: "100%", fontSize: 10, padding: "3px 5px",
-                background: "transparent", color: "#93AFCC",
+                background: "transparent", color: "#93A6BC",
                 border: "1px solid #3A5878", borderRadius: 5, cursor: "pointer" }}>
               Reset request counter
             </button>
             {lim.caution ? (
-              <div style={{ fontSize: 9.5, color: "#8AA3BE", marginTop: 6, lineHeight: 1.4 }}>{lim.caution}</div>
+              <div style={{ fontSize: 9.5, color: "#7E90A6", marginTop: 6, lineHeight: 1.4 }}>{lim.caution}</div>
             ) : null}
           </div>
         )}
       </div>
 
-      <div style={{ marginTop: 8, fontSize: 10, color: "#8AA3BE" }}>
+      <div style={{ marginTop: 8, fontSize: 9.5, color: "#7E90A6", lineHeight: 1.45 }}>
+        Estimates are approximate (±10–15%) unless marked exact — tokenisation is
+        model-specific. Free tiers are rate-limited per minute and per day.
+      </div>
+
+      <div style={{ marginTop: 6, fontSize: 10, color: "#7E90A6" }}>
         {live && live.requestsRemaining != null
           ? `Live from provider: ${live.requestsRemaining} requests left.`
           : lim.isDefault
@@ -212,17 +227,25 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
   const u = usage || { total: 0, input: 0, output: 0, calls: 0, estimated: false };
   return (
     <div style={PANEL}>
-      <div style={{ ...LABEL, color: "#BBD2EA", fontSize: 10.5, marginBottom: 8 }}>Usage — this tool</div>
+      <div style={{ ...LABEL, color: "#CFE0F2", fontSize: 10.5, marginBottom: 2 }}>Usage — this tool</div>
+      <div style={{ fontSize: 10, color: "#7E90A6", marginBottom: 8 }}>
+        via {String(provider).toLowerCase().includes("gemini") ? "Google Gemini" : "Anthropic Claude"}
+      </div>
 
       <div style={LABEL}>Tokens</div>
       <div style={BIG}>{formatTokens(u.total)}</div>
-      <div style={{ fontSize: 10.5, color: "#93AFCC", marginTop: 2 }}>
+      <div style={{ fontSize: 10.5, color: "#93A6BC", marginTop: 2 }}>
         {formatTokens(u.input)} in · {formatTokens(u.output)} out
       </div>
 
       <div style={{ marginTop: 10 }}>
         <div style={LABEL}>API calls</div>
-        <div style={{ ...BIG, fontSize: 15 }}>{u.calls}</div>
+        <div style={{ ...BIG, fontSize: 15, color: ACCENT }}>{u.calls}</div>
+        {u.lastRun && (
+          <div style={{ fontSize: 10, color: "#7E90A6", marginTop: 2 }}>
+            last run {new Date(u.lastRun).toLocaleTimeString()}
+          </div>
+        )}
       </div>
 
       {u.estimated && (
@@ -235,7 +258,7 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
       {partial && Array.isArray(partial.remaining) && partial.remaining.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 9, borderTop: "1px solid #3A5878", color: "#F5A493", fontSize: 11 }}>
           <strong>Report incomplete.</strong>
-          <div style={{ color: "#A9BDD3", marginTop: 3 }}>
+          <div style={{ color: "#93A6BC", marginTop: 3 }}>
             Still to generate: {partial.remaining.join(", ")}. You can switch API
             key first — work already done is kept.
           </div>
@@ -248,7 +271,7 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
           onClick={onReset}
           style={{
             marginTop: 11, width: "100%", padding: "5px 8px", fontSize: 10.5,
-            background: "transparent", color: "#93AFCC",
+            background: "transparent", color: "#93A6BC",
             border: "1px solid #3A5878", borderRadius: 6, cursor: "pointer",
           }}
         >
@@ -268,22 +291,22 @@ export default function TokenRails({ provider, usage, estimate, partial, onReset
   // The rails are position:fixed in the page gutters, so they take NO width
   // from the centre column. An earlier revision used a 3-column grid and shrank
   // every tool - do not reintroduce that.
+  // Both rails stacked in the LEFT gutter. The right gutter is reclaimed by the
+  // tool column (see .as2p-rail-main), so no space is left empty. Fixed
+  // positioning keeps them visible while only the tool column scrolls.
   return (
     <>
-      <aside className="as2p-rail as2p-rail-left">
+      <aside className="as2p-rail-stack">
         <BudgetRail
           provider={provider}
           estimate={estimate}
           onCalculate={onCalculate}
           calculating={calculating}
         />
+        <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset} />
       </aside>
 
       <div className="as2p-rail-main">{children}</div>
-
-      <aside className="as2p-rail as2p-rail-right">
-        <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset} />
-      </aside>
     </>
   );
 }
