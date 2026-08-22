@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, fileToBase64Raw, fileToImagePart, extractJSON } from "../utils/helpers";
@@ -450,10 +449,6 @@ export default function SiteContextAnalyzer() {
               <p className="text-xs text-[#2F5D3F] bg-[#EAF3EC] border border-[#BBD6C2] rounded p-2 mt-2">{imageStatus}</p>
             )}
             <p className="text-[10px] text-[#8A8474]">Up to 4 images. Image upload may not work inside the Claude mobile app (platform restriction) - try your phone's regular browser, or use the text fields above.</p>
-            <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
-                onReset={() => setTokenUsage(resetUsage("SCX"))} />
-            </div>
             <button onClick={analyzeSiteContext} disabled={contextLoading} style={BTN_GOLD} className="w-full text-base font-bold px-4 py-3 rounded-md flex items-center justify-center gap-2 disabled:opacity-40 shadow-md">
               <Search size={18} /> {contextLoading ? "Researching site context..." : "Analyze Site Context"}
             </button>

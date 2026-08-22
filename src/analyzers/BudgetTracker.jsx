@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -1236,14 +1235,6 @@ export default function BudgetTracker() {
       <div className="card p-4">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
           <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h3>
-          <div className="mb-3">
-            <TokenMeter
-              usage={tokenUsage}
-              estimate={insightEstimate}
-              provider={provider}
-              onReset={() => setTokenUsage(resetUsage("BDG"))}
-            />
-          </div>
           <button onClick={generateInsight} disabled={insightLoading || comparing || !apiKey}
             className="btn-dark disabled:opacity-60 disabled:cursor-not-allowed">
             {insightLoading || comparing

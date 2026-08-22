@@ -304,6 +304,7 @@ export default function App() {
             display:none preserves component state, timers and scroll position.
             Do not swap it for conditional rendering to "tidy the DOM".
           */}
+          <div className="as2p-tools-theme">
           <TokenRails
             provider={provider}
             usage={railUsage}
@@ -319,6 +320,7 @@ export default function App() {
               ) : null
             )}
           </TokenRails>
+          </div>
         </main>
 
         <footer className="border-t border-brand-border bg-white py-4 text-center text-[10px] text-brand-text/50">

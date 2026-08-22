@@ -3,7 +3,6 @@ import { Sparkles, AlertTriangle, Info, Layers, Copy, CheckCircle2, Upload, File
 import * as XLSX from "xlsx";
 import * as mammoth from "mammoth";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -422,14 +421,6 @@ export default function CombinedDocumentGenerator() {
                 ))}
               </div>
             )}
-          </div>
-
-          <div className="mb-3">
-
-            <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
-
-              onReset={() => setTokenUsage(resetUsage("CMB"))} />
-
           </div>
 
           <button onClick={generateConsolidated} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>

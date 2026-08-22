@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
@@ -479,10 +478,6 @@ export default function ConceptGenerator() {
               Clear concepts and start again
             </button>
           )}
-          <div className="mb-3">
-            <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
-              onReset={() => setTokenUsage(resetUsage("CPT"))} />
-          </div>
           <button onClick={generateConcepts} disabled={loading || !apiKey} className="btn-gold w-full disabled:opacity-60">
             {loading
               ? <span className="inline-block w-[18px] h-[18px] border-2 border-brand-dark/30 border-t-brand-dark rounded-full animate-spin" />

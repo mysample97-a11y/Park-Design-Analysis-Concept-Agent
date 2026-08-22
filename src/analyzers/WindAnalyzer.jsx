@@ -4,7 +4,6 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -429,10 +428,6 @@ export default function WindAnalyzer() {
         <div className="p-4">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
-            <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
-                onReset={() => setTokenUsage(resetUsage("WND"))} />
-            </div>
             <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>

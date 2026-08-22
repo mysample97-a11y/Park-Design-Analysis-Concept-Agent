@@ -444,18 +444,9 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
           </div>
         </div>
 
-        <div id="sp-limits" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
-          <h3 className="font-semibold text-brand-dark text-sm">API tier and limits</h3>
-          <p className="text-[11px] text-brand-muted">
-            Used by the token meter on each tool to warn you BEFORE a run runs out.
-            Request limits matter more than token limits here: a free Gemini key allows
-            around 250,000 tokens per minute but only about 15 requests per minute and
-            1,500 per day, so it is almost always the request count that stops a run.
-          </p>
-          <TierLimits provider="claude" />
-          <div className="h-px bg-brand-border my-2" />
-          <TierLimits provider="gemini" />
-        </div>
+        {/* API tier and limits now live in the BUDGET rail beside the tools.
+            They were maintained in two places, which meant two sources for one
+            number, and the rail is where they are actually consulted. */}
 
 
         {/* Gemini Key */}

@@ -6,7 +6,6 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -383,10 +382,6 @@ export default function SurveyAnalyzer() {
               <span className="font-semibold">{parsed.responseCount}</span> response{parsed.responseCount !== 1 ? "s" : ""} parsed
               {parsed.responseCount < 20 && <span className="text-brand-warning"> - small sample, treat patterns as indicative</span>}
             </p>
-            <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
-                onReset={() => setTokenUsage(resetUsage("SUR"))} />
-            </div>
             <button onClick={generateAnalysis} disabled={analysisLoading || !apiKey} className="btn-dark">
               {chunkState.done.length === 0 ? "Generate AI Insight"
                 : insightComplete ? "Regenerate AI Insight"

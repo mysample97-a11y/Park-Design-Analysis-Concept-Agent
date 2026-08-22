@@ -61,22 +61,81 @@ input, textarea, select { color: #1C2333; }
 .landing-root input, .landing-root textarea, .landing-root select { color: inherit; }
 
 /* ---------------------------------------------------------------------------
-   TOKEN RAILS (F31)
-   Three-column shell for the TOOL interface only. The landing pages are not
-   wrapped in this and are unaffected.
-   Below 1280px the rails are hidden rather than compressed: a squeezed rail is
-   harder to read than no rail, and every tool still carries its inline meter.
---------------------------------------------------------------------------- */
-.as2p-rails {
-  display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 232px;
-  gap: 18px;
-  align-items: start;
-}
-.as2p-rail-main { min-width: 0; }        /* prevents the centre column overflowing */
-.as2p-rail { display: block; }
+   TOKEN RAILS (F31, rev 2)
 
-@media (max-width: 1279px) {
-  .as2p-rails { grid-template-columns: minmax(0, 1fr); }
+   REGRESSION FIXED: the first version used a 3-column grid, which took width
+   AWAY from the centre column and shrank every tool. The rails now sit in the
+   page gutters with `position: fixed`, so they occupy space the layout was
+   already wasting and the centre column keeps its original width exactly.
+
+   They are fixed rather than sticky so they never scroll out of view - the
+   whole point is to be able to watch the counters from anywhere in a long tool
+   page while only the centre scrolls.
+
+   Below 1400px there are no gutters wide enough to hold them, so they are
+   hidden rather than allowed to overlap the content.
+--------------------------------------------------------------------------- */
+.as2p-rail {
+  position: fixed;
+  top: 88px;                       /* clears the app header */
+  width: 236px;
+  max-height: calc(100vh - 108px);
+  overflow-y: auto;
+  z-index: 30;
+}
+.as2p-rail-left  { left: max(12px, calc((100vw - 1180px) / 2 - 250px)); }
+.as2p-rail-right { right: max(12px, calc((100vw - 1180px) / 2 - 250px)); }
+.as2p-rail-main  { width: 100%; }   /* unchanged - centre keeps its own width */
+
+@media (max-width: 1399px) {
   .as2p-rail { display: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   FROSTED BLUE THEME - TOOL INTERFACE ONLY
+
+   Scoped to .as2p-tools-theme, which wraps the tool shell. The landing pages,
+   video sections and navigation are outside it and keep their existing look.
+
+   Every rule below only retints SURFACES. Text, icons, borders and the warning
+   / danger / success colours are left alone, so nothing becomes invisible -
+   the earlier cream-on-cream and white-on-white failures came from restyling
+   text, and that is deliberately not done here.
+--------------------------------------------------------------------------- */
+.as2p-tools-theme {
+  --frost-page:    #EAF0F7;
+  --frost-surface: #F5F9FD;
+  --frost-header:  #E3ECF6;
+  --frost-border:  #C8D8E8;
+  background: var(--frost-page);
+}
+.as2p-tools-theme .card,
+.as2p-tools-theme .bg-white {
+  background: var(--frost-surface) !important;
+  border-color: var(--frost-border) !important;
+}
+.as2p-tools-theme .card-header {
+  background: var(--frost-header) !important;
+  border-color: var(--frost-border) !important;
+}
+.as2p-tools-theme .input-field,
+.as2p-tools-theme input[type="text"],
+.as2p-tools-theme input[type="number"],
+.as2p-tools-theme textarea,
+.as2p-tools-theme select {
+  background: #FFFFFF !important;
+  border-color: var(--frost-border) !important;
+  color: #16212E !important;          /* explicit: never inherit a pale colour */
+}
+.as2p-tools-theme .input-field::placeholder,
+.as2p-tools-theme textarea::placeholder { color: #7A8CA0 !important; }
+
+/* Cream panels used for tool intros retinted, text untouched. */
+.as2p-tools-theme [class*="bg-[#FBF1E1]"],
+.as2p-tools-theme [class*="bg-[#F7F5F1]"],
+.as2p-tools-theme [class*="bg-[#FAF7F2]"] {
+  background: #E8F1FA !important;
+  border-color: var(--frost-border) !important;
+}
+/* Status colours are NOT retinted - amber warnings and red errors must stay
+   recognisable as warnings and errors. */

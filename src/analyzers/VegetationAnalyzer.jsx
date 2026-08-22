@@ -4,7 +4,6 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
-import TokenMeter from "../components/TokenMeter";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -382,10 +381,6 @@ export default function VegetationAnalyzer() {
             <div>
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">Step 2 — AI Insight & Recommendation</h2>
               <p className="text-[10px] text-brand-text/60">Uses your site context + terrain/soil data + reference palette to suggest what actually fits this site.</p>
-            </div>
-            <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
-                onReset={() => setTokenUsage(resetUsage("VEG"))} />
             </div>
             <button onClick={generateInsight} disabled={insightLoading || !apiKey} className="btn-dark">
               {chunkState.done.length === 0 ? "Generate AI Insight"
