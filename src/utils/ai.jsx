@@ -113,6 +113,14 @@ export async function withRetry(makeRequest, onAttempt) {
 }
 
 /** Human-readable explanation for a transient status. */
+/** Prefixes a provider error so it can never be mistaken for the other one. */
+export function attributeError(provider, message, model) {
+  const name = String(provider).toLowerCase().includes("gemini") ? "Google Gemini" : "Anthropic Claude";
+  const tag = model ? `${name} (${model})` : name;
+  const text = String(message || "").trim() || "returned an error with no message.";
+  return `${tag}: ${text}`;
+}
+
 export function transientMessage(status) {
   if (status === 529) {
     return "The AI provider is temporarily overloaded (HTTP 529). This is a problem at their end, " +
@@ -212,7 +220,10 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
   }
 
   if (!response.ok) {
-    const errMsg = data?.error?.message || `Gemini API Error (${response.status})`;
+    const transientG = transientMessage(response.status);
+    if (transientG) throw new Error(attributeError("gemini", transientG, model));
+    const errMsg = attributeError("gemini",
+      data?.error?.message || `API error (HTTP ${response.status})`, model);
     if (response.status === 400 && errMsg.toLowerCase().includes("key")) {
       throw new Error("API key invalid. Please verify your Google AI Studio key in Settings.");
     }
@@ -294,8 +305,9 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const transient = transientMessage(response.status);
-    if (transient) throw new Error(transient);
-    throw new Error(data?.error?.message || `Claude API Error (${response.status})`);
+    if (transient) throw new Error(attributeError("claude", transient, model));
+    throw new Error(attributeError("claude",
+      data?.error?.message || `API error (HTTP ${response.status})`, model));
   }
   if (useWebSearch && typeof onSources === "function") {
     const sources = [];

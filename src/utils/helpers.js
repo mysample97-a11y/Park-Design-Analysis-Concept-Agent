@@ -29,6 +29,30 @@ export function fileToBase64(file) {
  * bytes. Non-images and any failure fall through to the original encoding: a
  * failed optimisation must never block an upload the user asked for.
  */
+/**
+ * Returns base64 AND the media type that actually describes those bytes.
+ *
+ * This exists because fileToBase64Raw re-encodes images to JPEG. Callers that
+ * kept using `file.type` then labelled JPEG bytes as "image/png", and the
+ * provider rejected the block - which is why Site Context stopped reading
+ * images at all after downscaling was introduced. The encoder must report its
+ * own output format; the caller must not assume it.
+ */
+export async function fileToImagePart(file) {
+  try {
+    if (file && typeof file.type === "string" && file.type.startsWith("image/")) {
+      const { downscaleImage } = await import("./localDocRead");
+      const r = await downscaleImage(file);
+      if (r && r.base64) {
+        return { base64: r.base64, mediaType: r.mediaType || "image/jpeg", note: r.note || "" };
+      }
+    }
+  } catch { /* fall through */ }
+  const dataUrl = await fileToBase64(file);
+  const base64 = dataUrl && dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+  return { base64, mediaType: file?.type || "image/png", note: "Sent without resizing." };
+}
+
 export async function fileToBase64Raw(file) {
   try {
     if (file && typeof file.type === "string" && file.type.startsWith("image/")) {

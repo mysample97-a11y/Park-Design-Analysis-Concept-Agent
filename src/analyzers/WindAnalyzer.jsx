@@ -77,10 +77,12 @@ export default function WindAnalyzer() {
   }
 
 
-  const [zones, setZones] = useState([
-    { id: uid(), name: "Public Cinema / Picnic Green Space", wantsCooling: true, hasScreening: false },
-    { id: uid(), name: "Yoga & Meditation + Elderly Sit-Out", wantsCooling: true, hasScreening: false },
-  ]);
+  // Empty by design. Two example zones used to be hardcoded here - names from a
+  // different project - which made the tool look as though it had already
+  // analysed this site. Zones are optional: the wind reference is researched for
+  // the whole plot from the location alone, and per-zone advice is an addition
+  // to that, not a precondition for it.
+  const [zones, setZones] = useState([]);
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
@@ -295,6 +297,26 @@ export default function WindAnalyzer() {
           {researchError && <p className="text-xs text-brand-danger">{friendlyError(researchError)}</p>}
         </div>
       </div>
+      {/*
+        F30 - GATE. Everything below the location step appears only once the wind
+        reference has been researched. Showing it beforehand contradicted the
+        tool's own instruction ("Nothing is analysed until this is done") and made
+        an un-run tool look like a completed analysis. Matches the Solar tool.
+
+        Zones are OPTIONAL: the reference is researched for the whole plot from
+        the location alone. Naming zones only adds per-zone advice on top.
+      */}
+      {SEASONS.length === 0 && (
+        <div className="card">
+          <div className="p-4 text-sm text-brand-muted">
+            Research the wind reference for your location above to continue.
+            The analysis covers the whole plot; naming individual zones afterwards
+            is optional and only adds per-zone recommendations.
+          </div>
+        </div>
+      )}
+
+      {SEASONS.length > 0 && (<>
       <div className="card">
         <div className="card-header flex items-center justify-between">
           <span>Zone Wind Exposure Advisor</span>
@@ -319,6 +341,7 @@ export default function WindAnalyzer() {
           })}
         </div>
       </div>
+      </>)}
 
       <div className="bg-[#FBEAE7] border border-[#F0C8C0] rounded-lg p-4 flex gap-3">
         <AlertTriangle size={18} className="text-brand-danger shrink-0 mt-0.5" />

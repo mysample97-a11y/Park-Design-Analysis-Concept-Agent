@@ -5,7 +5,7 @@ import { callAI } from "../utils/ai";
 import TokenMeter from "../components/TokenMeter";
 import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
-import { friendlyError, fileToBase64Raw, extractJSON } from "../utils/helpers";
+import { friendlyError, fileToBase64Raw, fileToImagePart, extractJSON } from "../utils/helpers";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
@@ -68,6 +68,7 @@ export default function SiteContextAnalyzer() {
   // guard swallowed the message and the click appeared to do nothing at all.
   const [pdfError, setPdfError] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
+  const [imageStatus, setImageStatus] = useState("");
   const [location, setLocation] = useState("");
   const [siteDescription, setSiteDescription] = useState("");
   const [context, setContext] = useState(null);
@@ -89,17 +90,24 @@ export default function SiteContextAnalyzer() {
     if (!files.length) return;
     setImageLoading(true);
     setContextError("");
+    setImageStatus("");
     try {
       const blocks = [];
       for (const f of files) {
-        const b64 = await fileToBase64Raw(f);
-        blocks.push({ type: "image", source: { type: "base64", media_type: f.type || "image/png", data: b64 } });
+        // media_type MUST come from the encoder, not from the original file:
+        // the image is re-encoded to JPEG on the way through.
+        const part = await fileToImagePart(f);
+        if (!part || !part.base64) throw new Error(`"${f.name}" could not be read as an image.`);
+        blocks.push({ type: "image", source: { type: "base64", media_type: part.mediaType, data: part.base64 } });
       }
       blocks.push({ type: "text", text: "These are site/GIS/map images for a park design project. Describe what surrounds the site on each edge - adjacent land uses, roads, buildings, transit, open space. Note anything relevant to arrival, access or noise. Write plain factual observations, no speculation." });
       const text = await callAI({
         onUsage: noteUsage, provider, apiKey, maxTokens: 2500, content: blocks });
       if (!text) throw new Error("The AI returned no description for these images.");
       setImageNotes((prev) => (prev ? prev + "\n\n" : "") + text);
+      // Confirm on screen. Previously the button simply reverted to its idle
+      // label and nothing said whether the read had worked.
+      setImageStatus(`Read ${files.length} image${files.length === 1 ? "" : "s"}. The interpretation is included in the analysis below.`);
     } catch (e) {
       setContextError(e.message || "Could not read these images.");
     } finally {
@@ -437,6 +445,9 @@ export default function SiteContextAnalyzer() {
                 </div>
                 <p className="text-[10px] text-brand-text whitespace-pre-wrap max-h-32 overflow-y-auto">{imageNotes}</p>
               </div>
+            )}
+            {imageStatus && (
+              <p className="text-xs text-[#2F5D3F] bg-[#EAF3EC] border border-[#BBD6C2] rounded p-2 mt-2">{imageStatus}</p>
             )}
             <p className="text-[10px] text-[#8A8474]">Up to 4 images. Image upload may not work inside the Claude mobile app (platform restriction) - try your phone's regular browser, or use the text fields above.</p>
             <div className="mb-3">

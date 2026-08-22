@@ -24,6 +24,21 @@ const TABS = [
 
 export const AppContext = createContext(null);
 
+/**
+ * Tools kept mounted once visited, so switching tabs never destroys work.
+ * Registry form keeps the mount rule in one place rather than repeated per tool.
+ */
+const TOOL_PANELS = [
+  { id: "site", Component: SiteContextAnalyzer },
+  { id: "solar", Component: SolarAnalyzer },
+  { id: "survey", Component: SurveyAnalyzer },
+  { id: "wind", Component: WindAnalyzer },
+  { id: "veg", Component: VegetationAnalyzer },
+  { id: "concept", Component: ConceptGenerator },
+  { id: "budget", Component: BudgetTracker },
+  { id: "combined", Component: CombinedDocumentGenerator },
+];
+
 export function useAppContext() {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("useAppContext must be inside AppContext.Provider");
@@ -32,6 +47,12 @@ export function useAppContext() {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("site");
+  // Tools that have been opened at least once. Mount-once, keep-alive.
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set());
+  useEffect(() => {
+    if (!activeTab) return;
+    setVisitedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState("settings");
   const [view, setView] = useState("landing");   // "landing" | "app"
@@ -250,14 +271,29 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === "site" && <SiteContextAnalyzer />}
-          {activeTab === "solar" && <SolarAnalyzer />}
-          {activeTab === "survey" && <SurveyAnalyzer />}
-          {activeTab === "wind" && <WindAnalyzer />}
-          {activeTab === "veg" && <VegetationAnalyzer />}
-          {activeTab === "concept" && <ConceptGenerator />}
-          {activeTab === "budget" && <BudgetTracker />}
-          {activeTab === "combined" && <CombinedDocumentGenerator />}
+          {/*
+            F29 - DO NOT go back to `activeTab === "x" && <Tool />`.
+
+            That form UNMOUNTS the tool on every tab change, and React discards
+            all of its state with it. Users lost entire sessions of pasted survey
+            data, uploaded files and paid AI output simply by looking at another
+            tool - which is the single most expensive bug this app had.
+
+            Instead each tool is mounted ONCE, on first visit, and then kept
+            mounted but hidden. `visitedTabs` means an unvisited tool is never
+            mounted, so nothing is paid for until it is opened, and the mount
+            cost is incurred once rather than on every switch.
+
+            display:none preserves component state, timers and scroll position.
+            Do not swap it for conditional rendering to "tidy the DOM".
+          */}
+          {TOOL_PANELS.map(({ id, Component }) =>
+            visitedTabs.has(id) ? (
+              <div key={id} style={{ display: activeTab === id ? "block" : "none" }}>
+                <Component />
+              </div>
+            ) : null
+          )}
         </main>
 
         <footer className="border-t border-brand-border bg-white py-4 text-center text-[10px] text-brand-text/50">
