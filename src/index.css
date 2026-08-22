@@ -61,33 +61,33 @@ input, textarea, select { color: #1C2333; }
 .landing-root input, .landing-root textarea, .landing-root select { color: inherit; }
 
 /* ---------------------------------------------------------------------------
-   TOOL SHELL — DARK THEME + LEFT RAIL STACK   (F31 rev 3)
+   TOOL SHELL - DARK THEME   (F31 rev 4)
 
-   Scoped entirely to .as2p-tools-theme, which wraps ONLY the tool interface.
-   The two landing pages with the video and animations are outside it and are
-   deliberately untouched.
+   Scoped to .as2p-tools-theme. The two video landing pages are outside it and
+   are untouched.
 
-   LAYOUT
-   Both rails are stacked in the LEFT gutter, one below the other, and the tool
-   column is shifted right to consume the space that used to be empty on the
-   right. The rails are fixed, so they take no width from the tool column.
+   WHY REV 3 PRODUCED INVISIBLE TEXT
+   Rev 3 listed specific hex classes (bg-[#FBF1E1] etc). Anything it missed kept
+   its light background, while the text rules still fired - light text on a light
+   panel. Worse, the tools also use arbitrary TEXT colours (text-[#1C2333],
+   text-[#5A5445] ...) which were never overridden at all, so dark text stayed
+   dark on the panels that DID go dark.
 
-   VISIBILITY IS THE HARD PART
-   Going dark means every rule that assumed dark-text-on-cream is now wrong.
-   Text colours are therefore set EXPLICITLY below rather than left to inherit -
-   an earlier revision of this app shipped near-white text on a near-white field
-   by relying on inheritance, and it made the tools look broken. Semantic
-   colours (warning amber, danger red, success green) are brightened rather than
-   replaced, so a warning still reads as a warning.
+   Rev 4 uses CATCH-ALLS instead of an enumerated list:
+     [class*="bg-[#"]    every arbitrary background        -> dark surface
+     [class*="text-[#"]  every arbitrary text colour       -> light text
+   Specific semantic panels are then re-tinted AFTER the catch-all, so warnings
+   still look like warnings. Nothing can be missed by omission any more.
 --------------------------------------------------------------------------- */
 .as2p-tools-theme {
-  --t-bg:        #0A0E14;   /* page */
-  --t-surface:   #121924;   /* cards */
-  --t-surface-2: #172232;   /* headers, insets */
-  --t-border:    #223043;
+  --t-bg:        #0A0E14;
+  --t-surface:   #121924;
+  --t-surface-2: #172232;
+  --t-border:    #22304A;
   --t-text:      #E8EFF7;
   --t-muted:     #93A6BC;
   --t-blue:      #4DA3FF;
+  --t-blue-2:    #2E6FD6;
   --t-orange:    #FF8A3D;
 
   background: var(--t-bg);
@@ -97,136 +97,133 @@ input, textarea, select { color: #1C2333; }
   padding-bottom: 40px;
 }
 
-/* ---- rails: stacked, left gutter, fixed ---- */
+/* ---- LAYOUT: rails left, content uses the rest ---- */
 .as2p-rail-stack {
   position: fixed;
-  left: 16px;
-  top: 132px;                        /* clears the header AND the tab strip */
-  width: 246px;
-  max-height: calc(100vh - 152px);
+  left: 14px;
+  top: 132px;
+  width: 238px;
+  max-height: calc(100vh - 150px);
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  z-index: 30;
+  display: flex; flex-direction: column; gap: 12px;
+  z-index: 40;
   padding-bottom: 8px;
 }
 .as2p-rail-stack::-webkit-scrollbar { width: 6px; }
-.as2p-rail-stack::-webkit-scrollbar-thumb { background: #223043; border-radius: 3px; }
+.as2p-rail-stack::-webkit-scrollbar-thumb { background: #22304A; border-radius: 3px; }
 
-/* tool column shifted right so the reclaimed space is used, not left blank */
-.as2p-tools-theme .as2p-rail-main { margin-left: 278px; margin-right: 8px; }
-
+/* Content sits right of the rails and runs close to the right edge, so the
+   wasted gutter is reclaimed. Settings uses the SAME width, so the two never
+   disagree and the rails cannot overlap either of them. */
+.as2p-tools-theme .as2p-rail-main,
+.as2p-tools-theme .as2p-wide {
+  margin-left: 266px;
+  margin-right: 24px;
+  max-width: none;
+}
 @media (max-width: 1279px) {
   .as2p-rail-stack { display: none; }
-  .as2p-tools-theme .as2p-rail-main { margin-left: 0; margin-right: 0; }
+  .as2p-tools-theme .as2p-rail-main,
+  .as2p-tools-theme .as2p-wide { margin-left: 12px; margin-right: 12px; }
 }
 
-/* ---- surfaces ---- */
+/* ---- CATCH-ALL 1: every arbitrary background becomes a dark surface ---- */
+.as2p-tools-theme [class*="bg-[#"] {
+  background-color: var(--t-surface-2) !important;
+  border-color: var(--t-border) !important;
+}
+/* ---- CATCH-ALL 2: every arbitrary text colour becomes readable ---- */
+.as2p-tools-theme [class*="text-[#"] { color: var(--t-text) !important; }
+
+/* ---- core surfaces ---- */
 .as2p-tools-theme .card,
-.as2p-tools-theme .bg-white {
-  background: var(--t-surface) !important;
+.as2p-tools-theme .bg-white,
+.as2p-tools-theme [class*="bg-white"] {
+  background-color: var(--t-surface) !important;
   border-color: var(--t-border) !important;
   color: var(--t-text) !important;
 }
 .as2p-tools-theme .card-header {
-  background: var(--t-surface-2) !important;
+  background-color: var(--t-surface-2) !important;
   border-color: var(--t-border) !important;
   color: var(--t-text) !important;
 }
 
-/* ---- text: set explicitly, never inherited ---- */
-.as2p-tools-theme,
-.as2p-tools-theme p,
-.as2p-tools-theme span,
-.as2p-tools-theme div,
-.as2p-tools-theme li,
-.as2p-tools-theme td,
-.as2p-tools-theme th,
-.as2p-tools-theme label,
+/* ---- text ---- */
+.as2p-tools-theme, .as2p-tools-theme p, .as2p-tools-theme span,
+.as2p-tools-theme div, .as2p-tools-theme li, .as2p-tools-theme td,
+.as2p-tools-theme th, .as2p-tools-theme label, .as2p-tools-theme strong,
 .as2p-tools-theme h1, .as2p-tools-theme h2, .as2p-tools-theme h3,
 .as2p-tools-theme h4, .as2p-tools-theme h5, .as2p-tools-theme h6 { color: var(--t-text); }
 .as2p-tools-theme [class*="text-brand-muted"],
-.as2p-tools-theme [class*="text-brand-text/"] { color: var(--t-muted) !important; }
+.as2p-tools-theme [class*="text-brand-text/"],
+.as2p-tools-theme [class*="/60"], .as2p-tools-theme [class*="/70"] { color: var(--t-muted) !important; }
 .as2p-tools-theme [class*="text-brand-dark"],
 .as2p-tools-theme [class*="text-brand-text"] { color: var(--t-text) !important; }
-.as2p-tools-theme a { color: var(--t-blue); }
+.as2p-tools-theme a, .as2p-tools-theme .underline { color: var(--t-blue) !important; }
+
+/* ---- semantic panels: re-tinted AFTER the catch-all ---- */
+.as2p-tools-theme .bg-\[\#FBF3E4\],
+.as2p-tools-theme .bg-\[\#FBF1E1\],
+.as2p-tools-theme .bg-\[\#FBF7EE\] {
+  background-color: rgba(255, 138, 61, 0.13) !important;
+  border-color: rgba(255, 138, 61, 0.45) !important;
+}
+.as2p-tools-theme .bg-\[\#FBF3E4\] *,
+.as2p-tools-theme .bg-\[\#FBF1E1\] *,
+.as2p-tools-theme .bg-\[\#FBF7EE\] * { color: #FFC79A !important; }
+
+.as2p-tools-theme .bg-\[\#FBEAE7\] {
+  background-color: rgba(255, 99, 71, 0.14) !important;
+  border-color: rgba(255, 99, 71, 0.45) !important;
+}
+.as2p-tools-theme .bg-\[\#FBEAE7\] * { color: #FFB2A2 !important; }
+
+.as2p-tools-theme .bg-\[\#EAF3EC\] {
+  background-color: rgba(77, 208, 145, 0.14) !important;
+  border-color: rgba(77, 208, 145, 0.42) !important;
+}
+.as2p-tools-theme .bg-\[\#EAF3EC\] * { color: #9BE7C0 !important; }
 
 /* ---- inputs ---- */
-.as2p-tools-theme .input-field,
-.as2p-tools-theme .input,
-.as2p-tools-theme input,
-.as2p-tools-theme textarea,
-.as2p-tools-theme select {
-  background: #0E1520 !important;
+.as2p-tools-theme .input-field, .as2p-tools-theme .input,
+.as2p-tools-theme input, .as2p-tools-theme textarea, .as2p-tools-theme select {
+  background-color: #0E1520 !important;
   border-color: var(--t-border) !important;
   color: var(--t-text) !important;
 }
 .as2p-tools-theme input::placeholder,
 .as2p-tools-theme textarea::placeholder { color: #6B7F97 !important; }
 
-/* ---- buttons: blue primary, orange accent, matching the reference ---- */
+/* ---- buttons: blue primary, orange secondary, both with a visible border ---- */
 .as2p-tools-theme .btn-dark,
-.as2p-tools-theme .btn-gold {
-  background: linear-gradient(180deg, #2E6FD6 0%, #2359B4 100%) !important;
-  border: 1px solid #3E82EC !important;
+.as2p-tools-theme button[class*="btn-dark"] {
+  background: linear-gradient(180deg, #2E6FD6 0%, #1F4FA8 100%) !important;
+  border: 1px solid #4D8BE8 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 0 1px rgba(77,163,255,0.15);
+}
+.as2p-tools-theme .btn-gold,
+.as2p-tools-theme button[class*="btn-gold"] {
+  background: linear-gradient(180deg, #F0812F 0%, #C75F14 100%) !important;
+  border: 1px solid #FF9A52 !important;
   color: #FFFFFF !important;
 }
-.as2p-tools-theme .btn-gold {
-  background: linear-gradient(180deg, #F0812F 0%, #D96A1C 100%) !important;
-  border-color: #FF9A52 !important;
+.as2p-tools-theme .btn-outline,
+.as2p-tools-theme button[class*="btn-outline"] {
+  background: #131C29 !important;
+  border: 1px solid #3A5C8A !important;
+  color: #DCE7F5 !important;
 }
-.as2p-tools-theme .btn-outline {
-  background: transparent !important;
-  border: 1px solid var(--t-border) !important;
-  color: var(--t-text) !important;
-}
-.as2p-tools-theme .btn-dark:disabled,
-.as2p-tools-theme .btn-gold:disabled { opacity: 0.5 !important; }
+.as2p-tools-theme .btn-outline:hover { border-color: var(--t-blue) !important; }
+.as2p-tools-theme button:disabled { opacity: .5 !important; }
 
-/* ---- notice panels: retinted, semantics preserved ---- */
-.as2p-tools-theme [class*="bg-[#FBF1E1]"],
-.as2p-tools-theme [class*="bg-[#FBF3E4]"] {
-  background: rgba(255, 138, 61, 0.12) !important;
-  border-color: rgba(255, 138, 61, 0.42) !important;
-}
-.as2p-tools-theme [class*="bg-[#FBF1E1]"] *,
-.as2p-tools-theme [class*="bg-[#FBF3E4]"] * { color: #FFC48F !important; }
-
-.as2p-tools-theme [class*="bg-[#FBEAE7]"],
-.as2p-tools-theme [class*="bg-[#FFF0EA]"],
-.as2p-tools-theme [class*="bg-[#FFF2EE]"] {
-  background: rgba(255, 99, 71, 0.12) !important;
-  border-color: rgba(255, 99, 71, 0.42) !important;
-}
-.as2p-tools-theme [class*="bg-[#FBEAE7]"] *,
-.as2p-tools-theme [class*="bg-[#FFF0EA]"] *,
-.as2p-tools-theme [class*="bg-[#FFF2EE]"] * { color: #FFAE9C !important; }
-
-.as2p-tools-theme [class*="bg-[#EAF3EC]"],
-.as2p-tools-theme [class*="bg-[#E6F0EA]"],
-.as2p-tools-theme [class*="bg-[#E8F2EC]"] {
-  background: rgba(77, 208, 145, 0.12) !important;
-  border-color: rgba(77, 208, 145, 0.40) !important;
-}
-.as2p-tools-theme [class*="bg-[#EAF3EC]"] *,
-.as2p-tools-theme [class*="bg-[#E6F0EA]"] *,
-.as2p-tools-theme [class*="bg-[#E8F2EC]"] * { color: #97E3BC !important; }
-
-/* neutral cream insets */
-.as2p-tools-theme [class*="bg-[#F7F5F1]"],
-.as2p-tools-theme [class*="bg-[#FAF7F2]"],
-.as2p-tools-theme [class*="bg-[#F6F3EE]"],
-.as2p-tools-theme [class*="bg-brand-cream"] {
-  background: var(--t-surface-2) !important;
+/* ---- tables, borders, code ---- */
+.as2p-tools-theme table, .as2p-tools-theme pre, .as2p-tools-theme code { color: var(--t-text); }
+.as2p-tools-theme pre { background: #0E1520 !important; }
+.as2p-tools-theme th { background-color: var(--t-surface-2) !important; }
+.as2p-tools-theme td, .as2p-tools-theme th, .as2p-tools-theme hr,
+.as2p-tools-theme [class*="border-brand"], .as2p-tools-theme [class*="border-["] {
   border-color: var(--t-border) !important;
 }
-.as2p-tools-theme [class*="bg-[#F7F5F1]"] *,
-.as2p-tools-theme [class*="bg-[#FAF7F2]"] * { color: var(--t-text) !important; }
-
-/* tables and dividers */
-.as2p-tools-theme table { color: var(--t-text); }
-.as2p-tools-theme th { background: var(--t-surface-2) !important; }
-.as2p-tools-theme td, .as2p-tools-theme th,
-.as2p-tools-theme hr, .as2p-tools-theme .border,
-.as2p-tools-theme [class*="border-brand"] { border-color: var(--t-border) !important; }
+.as2p-tools-theme input[type="checkbox"] { accent-color: var(--t-blue); }

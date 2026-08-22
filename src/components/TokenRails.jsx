@@ -90,6 +90,11 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
     <div style={PANEL}>
       <div style={{ ...LABEL, color: "#CFE0F2", fontSize: 10.5, marginBottom: 8 }}>Budget</div>
 
+      <div style={{ fontSize: 10, color: "#7E90A6", marginBottom: 7 }}>
+        {String(provider).toLowerCase().includes("gemini") ? "Google Gemini" : "Anthropic Claude"}
+        {" · "}{lim.tier === "free" ? "free tier" : "paid tier"}
+      </div>
+
       <div style={LABEL}>Requests this minute</div>
       <div style={BIG}>
         {win.lastMinute}
@@ -125,11 +130,14 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
             {estimate.exact ? " · counted by provider" : ""}
           </div>
         )}
-        {lim.tpm ? (
-          <div style={{ fontSize: 10.5, color: "#93A6BC", marginTop: 4 }}>
-            Token limit {formatTokens(lim.tpm)}/min
+        <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px solid #22304A" }}>
+          <div style={LABEL}>Declared limits</div>
+          <div style={{ fontSize: 11, color: "#B9CBE0", lineHeight: 1.7 }}>
+            <div>Requests / min <strong style={{ color: "#FFF" }}>{lim.rpm ?? "none"}</strong></div>
+            <div>Requests / day <strong style={{ color: "#FFF" }}>{lim.rpd ?? "none"}</strong></div>
+            <div>Tokens / min <strong style={{ color: "#FFF" }}>{lim.tpm ? formatTokens(lim.tpm) : "none"}</strong></div>
           </div>
-        ) : null}
+        </div>
         {onCalculate && (
           <button
             type="button"
@@ -306,7 +314,7 @@ export default function TokenRails({ provider, usage, estimate, partial, onReset
         <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset} />
       </aside>
 
-      <div className="as2p-rail-main">{children}</div>
+      <div className="as2p-rail-main as2p-wide">{children}</div>
     </>
   );
 }

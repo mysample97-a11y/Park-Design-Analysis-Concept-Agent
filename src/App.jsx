@@ -206,7 +206,7 @@ export default function App() {
         </header>
 
         {showSettings && (
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-10 bg-brand-cream rounded-lg my-4 shadow-2xl">
+          <div className="as2p-tools-theme as2p-wide px-4 sm:px-6 pt-6 pb-10 rounded-lg my-4 shadow-2xl">
             <SettingsPanel
               keys={keys}
               models={models}
