@@ -59,3 +59,24 @@ svg { max-width: 100%; height: auto; }
    Unlayered on purpose, so it wins the same way. */
 input, textarea, select { color: #1C2333; }
 .landing-root input, .landing-root textarea, .landing-root select { color: inherit; }
+
+/* ---------------------------------------------------------------------------
+   TOKEN RAILS (F31)
+   Three-column shell for the TOOL interface only. The landing pages are not
+   wrapped in this and are unaffected.
+   Below 1280px the rails are hidden rather than compressed: a squeezed rail is
+   harder to read than no rail, and every tool still carries its inline meter.
+--------------------------------------------------------------------------- */
+.as2p-rails {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) 232px;
+  gap: 18px;
+  align-items: start;
+}
+.as2p-rail-main { min-width: 0; }        /* prevents the centre column overflowing */
+.as2p-rail { display: block; }
+
+@media (max-width: 1279px) {
+  .as2p-rails { grid-template-columns: minmax(0, 1fr); }
+  .as2p-rail { display: none; }
+}

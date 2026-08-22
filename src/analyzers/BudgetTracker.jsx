@@ -3,7 +3,11 @@ import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import TokenMeter from "../components/TokenMeter";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import {
+  buildChunkedPrompt, emptyState, mergeChunk, isComplete,
+  progressLabel, savePartial, loadPartial, clearPartial,
+} from "../utils/chunkedGeneration";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -73,6 +77,38 @@ export default function BudgetTracker() {
   // session, including after swapping in a different key.
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("BDG"));
   const noteUsage = (u) => setTokenUsage(recordUsage("BDG", u));
+  /*
+    CHUNKED INSIGHT (F13b). Not about generating LESS - about not losing
+    everything when the budget runs out mid-reply. The model returns only
+    sections it can COMPLETE and declares what remains; whatever arrives is
+    merged and kept, and the next call continues from there - on a different
+    API key if needed. maxTokens is untouched, so depth per section is unchanged.
+  */
+  const INSIGHT_TOPICS = [
+    { key: "observations", label: "Observations" },
+    { key: "confidence_note", label: "Confidence note" },
+    { key: "conclusion", label: "Conclusion" },
+    { key: "optimisations", label: "Optimisations" },
+    { key: "bottlenecks", label: "Bottlenecks" },
+  ];
+  const [chunkState, setChunkState] = useState(() => loadPartial("BDG", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
+  const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
+  const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Exact token count on demand. On a button, not automatic: the counting call
+  // still costs one REQUEST, and requests are the scarce resource on a free key.
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      const exact = await countTokensExact({ provider, apiKey, model,
+        systemText: "analysis system instruction and methodology checklist", userText: preview });
+      setExactEstimate(exact && exact.exact
+        ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
+        : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
+    } catch { setExactEstimate(null); } finally { setCounting(false); }
+  }
 
   function addFacility() { setFacilities([...facilities, { id: uid(), name: "", area: "", rate: "" }]); }
   function updateFacility(id, patch) { setFacilities(facilities.map((f) => (f.id === id ? { ...f, ...patch } : f))); }
@@ -679,14 +715,32 @@ export default function BudgetTracker() {
                   within_budget: c.within_budget,
                 })))
             : "") +
-          "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+          "\n\nDATA:\n" + JSON.stringify(summary, null, 2) + chunkInstruction,
       });
       // extractJSON returns NULL on an unrecoverable reply - it does not throw.
       // Passing that null into state leaves the section silently empty.
       const parsedInsight = extractJSON(text);
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
-      setInsight(parsedInsight);
+      // Merge into accumulated state - never overwrites longer content with
+
+      // shorter, ignores invented keys, rejects a false completion claim.
+
+     
+        // Tells the model what is already written (so it is not repeated) and what
+        // still needs writing. On a first run `done` is empty and this behaves
+        // exactly like a normal single-pass call.
+        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+ const _merged = mergeChunk(chunkState, { sections: parsedInsight.sections || parsedInsight,
+
+        completed: parsedInsight.completed, remaining: parsedInsight.remaining,
+
+        continuation_summary: parsedInsight.continuation_summary }, INSIGHT_TOPICS);
+
+      setChunkState(_merged); savePartial("BDG", _merged);
+
+      setInsight({ ...parsedInsight, ..._merged.sections });
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -1197,6 +1251,19 @@ export default function BudgetTracker() {
               : <Sparkles size={15} />}
             {insightLoading || comparing ? "Working - do not navigate away" : "Generate AI Insight"}
           </button>
+          {chunkState.done.length > 0 && !insightComplete && (
+            <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+              <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
+              Still to generate: {chunkProgress.remainingLabels.join(", ")}.
+              <div className="text-brand-muted mt-1">Nothing already generated is lost. You may switch API key first, then continue.</div>
+            </div>
+          )}
+          {chunkState.done.length > 0 && (
+            <button type="button" className="mt-2 text-xs underline text-brand-muted"
+              onClick={() => { clearPartial("BDG"); setChunkState(emptyState(INSIGHT_TOPICS)); }}>
+              {insightComplete ? "Clear and start over" : "Discard partial insight and start over"}
+            </button>
+          )}
         </div>
         {insightLoading && <p className="text-sm text-brand-text">Reviewing cost build-up...</p>}
         {insightError && (<div className="space-y-1"><p className="text-sm text-brand-dark flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}

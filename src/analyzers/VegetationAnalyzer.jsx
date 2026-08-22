@@ -5,7 +5,11 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import TokenMeter from "../components/TokenMeter";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import {
+  buildChunkedPrompt, emptyState, mergeChunk, isComplete,
+  progressLabel, savePartial, loadPartial, clearPartial,
+} from "../utils/chunkedGeneration";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -22,6 +26,39 @@ export default function VegetationAnalyzer() {
   // usage is reported per tool so you can see which one is expensive.
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("VEG"));
   const noteUsage = (u) => setTokenUsage(recordUsage("VEG", u));
+  /*
+    CHUNKED INSIGHT (F13b). Not about generating LESS - about not losing
+    everything when the budget runs out mid-reply. The model returns only
+    sections it can COMPLETE and declares what remains; whatever arrives is
+    merged and kept, and the next call continues from there - on a different
+    API key if needed. maxTokens is untouched, so depth per section is unchanged.
+  */
+  const INSIGHT_TOPICS = [
+    { key: "terrain_soil_note", label: "Terrain soil note" },
+    { key: "inventory_guidance", label: "Inventory guidance" },
+    { key: "suggested_species", label: "Suggested species" },
+    { key: "existing_value", label: "Existing value" },
+    { key: "existing_vegetation", label: "Existing vegetation" },
+    { key: "conclusion", label: "Conclusion" },
+  ];
+  const [chunkState, setChunkState] = useState(() => loadPartial("VEG", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
+  const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
+  const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Exact token count on demand. On a button, not automatic: the counting call
+  // still costs one REQUEST, and requests are the scarce resource on a free key.
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      const exact = await countTokensExact({ provider, apiKey, model,
+        systemText: "analysis system instruction and methodology checklist", userText: preview });
+      setExactEstimate(exact && exact.exact
+        ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
+        : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
+    } catch { setExactEstimate(null); } finally { setCounting(false); }
+  }
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -147,14 +184,32 @@ export default function VegetationAnalyzer() {
           "(2) 'inventory_guidance': 1-2 sentences on how any existing inventory should inform retain/remove decisions (or note if none was provided), " +
           "(3) 'suggested_species': an array of 3-5 objects {name, reason} - species FROM THE REFERENCE PALETTE ONLY, each with a one-line reason tied to this site's actual conditions, " +
           "(4) 'conclusion': 2-3 sentences giving the single clearest planting/terrain/soil action to take next. " +
-          "Also return 'existing_value': a short paragraph on the ecological and amenity value of the existing planting and what is lost if it is cleared. Also return 'existing_vegetation': an array of {species, approx_count, condition, position, verdict (retain/relocate/remove), reason} assessing the existing planting inventory supplied - return an empty array if no inventory was given. Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"existing_value\": \"\", \"existing_vegetation\": [{\"species\": \"\", \"approx_count\": \"\", \"condition\": \"\", \"position\": \"\", \"verdict\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("VEG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+          "Also return 'existing_value': a short paragraph on the ecological and amenity value of the existing planting and what is lost if it is cleared. Also return 'existing_vegetation': an array of {species, approx_count, condition, position, verdict (retain/relocate/remove), reason} assessing the existing planting inventory supplied - return an empty array if no inventory was given. Respond with ONLY valid JSON, no markdown fences: {\"terrain_soil_note\": \"\", \"inventory_guidance\": \"\", \"suggested_species\": [{\"name\": \"\", \"reason\": \"\"}], \"existing_value\": \"\", \"existing_vegetation\": [{\"species\": \"\", \"approx_count\": \"\", \"condition\": \"\", \"position\": \"\", \"verdict\": \"\", \"reason\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("VEG") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2) + chunkInstruction,
       });
       // extractJSON returns NULL on an unrecoverable reply - it does not throw.
       // Passing that null into state leaves the section silently empty.
       const parsedInsight = extractJSON(text);
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
-      setInsight(parsedInsight);
+      // Merge into accumulated state - never overwrites longer content with
+
+      // shorter, ignores invented keys, rejects a false completion claim.
+
+     
+        // Tells the model what is already written (so it is not repeated) and what
+        // still needs writing. On a first run `done` is empty and this behaves
+        // exactly like a normal single-pass call.
+        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+ const _merged = mergeChunk(chunkState, { sections: parsedInsight.sections || parsedInsight,
+
+        completed: parsedInsight.completed, remaining: parsedInsight.remaining,
+
+        continuation_summary: parsedInsight.continuation_summary }, INSIGHT_TOPICS);
+
+      setChunkState(_merged); savePartial("VEG", _merged);
+
+      setInsight({ ...parsedInsight, ..._merged.sections });
       // Field-completeness guard. When the output budget runs short the model
       // drops the TAIL fields of a schema; the report then prints
       // "(not generated)" into those sections with nothing on screen to say
@@ -329,12 +384,27 @@ export default function VegetationAnalyzer() {
               <p className="text-[10px] text-brand-text/60">Uses your site context + terrain/soil data + reference palette to suggest what actually fits this site.</p>
             </div>
             <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+              <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
                 onReset={() => setTokenUsage(resetUsage("VEG"))} />
             </div>
             <button onClick={generateInsight} disabled={insightLoading || !apiKey} className="btn-dark">
-              <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
+              {chunkState.done.length === 0 ? "Generate AI Insight"
+                : insightComplete ? "Regenerate AI Insight"
+                : "Continue insight generation"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+                <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
+                Still to generate: {chunkProgress.remainingLabels.join(", ")}.
+                <div className="text-brand-muted mt-1">Nothing already generated is lost. You may switch API key first.</div>
+              </div>
+            )}
+            {chunkState.done.length > 0 && (
+              <button type="button" className="mt-2 text-xs underline text-brand-muted"
+                onClick={() => { clearPartial("VEG"); setChunkState(emptyState(INSIGHT_TOPICS)); }}>
+                Discard partial insight and start over
+              </button>
+            )}
           </div>
           {insightLoading && <p className="text-sm text-brand-text/60">Reviewing site context, inventory, and reference palette...</p>}
           {insightWarning && !insightError && (

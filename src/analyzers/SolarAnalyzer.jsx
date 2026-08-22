@@ -6,7 +6,11 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import TokenMeter from "../components/TokenMeter";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import {
+  buildChunkedPrompt, emptyState, mergeChunk, assembleSections,
+  isComplete, progressLabel, savePartial, loadPartial, clearPartial,
+} from "../utils/chunkedGeneration";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -112,6 +116,59 @@ export default function SolarAnalyzer() {
   // will be thin - the rest of the report is valid and must not be presented
   // as a failed run.
   const [insightWarning, setInsightWarning] = useState("");
+  /*
+    CHUNKED INSIGHT (F13b).
+  
+    The point is NOT to generate less. It is to stop losing everything when the
+    budget runs out mid-reply. The model is given the full topic list and told
+    to return only sections it can COMPLETE - four whole sections beat eight
+    truncated ones - then declare what remains. Whatever came back is merged and
+    kept; the next call continues from there, on a different API key if needed.
+  
+    Output length per call is unchanged (maxTokens is untouched). Depth per
+    section is unchanged. Only the failure mode changes.
+  */
+  const INSIGHT_TOPICS = [
+    { key: "site_wide_finding", label: "Site-wide solar finding" },
+    { key: "shade_strategy", label: "Shade strategy against published targets" },
+    { key: "thermal_comfort_note", label: "Thermal comfort (derived)" },
+    { key: "zone_recommendations", label: "Per-zone recommendations" },
+    { key: "conclusion", label: "Conclusions and recommendations" },
+  ];
+  // F27 - EXACT token count on demand.
+  // Both providers expose a free counting endpoint, so the estimate can become
+  // a measurement. It is on a BUTTON rather than automatic because the call
+  // still costs one REQUEST against RPM/RPD, and requests are the scarce
+  // resource on a free key - counting on every keystroke would be self-defeating.
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const named = zones.filter((z) => z.name.trim());
+      const preview = JSON.stringify({ location, zones: named }, null, 2);
+      const exact = await countTokensExact({
+        provider, apiKey, model,
+        systemText: "solar insight system instruction and methodology checklist",
+        userText: preview,
+      });
+      if (exact && exact.exact) {
+        setExactEstimate({ input: exact.input, output: Math.ceil(2500 * 0.7),
+          total: exact.input + Math.ceil(2500 * 0.7), calls: 1, exact: true });
+      } else {
+        // Endpoint unavailable or refused - fall back and SAY it is a heuristic.
+        setExactEstimate({ ...estimateRun({ userText: preview, maxTokens: 2500, calls: 1 }), exact: false });
+      }
+    } catch {
+      setExactEstimate(null);
+    } finally {
+      setCounting(false);
+    }
+  }
+
+  const [chunkState, setChunkState] = useState(() => loadPartial("SOL", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
+  const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
+  const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
 
   const activePreset = DATE_PRESETS.find((p) => p.id === preset);
   const dayData = siteInfo ? buildDayData(activePreset.month, activePreset.day, siteInfo.lat, siteInfo.lon, siteInfo.utc_offset) : [];
@@ -265,6 +322,14 @@ export default function SolarAnalyzer() {
       }),
     };
     try {
+      // Continuation-aware: tells the model what is already written so it does
+      // not repeat it, and what still needs writing. On a first run `done` is
+      // empty and this behaves exactly like a single-pass call.
+      const chunkInstruction = buildChunkedPrompt({
+        topics: INSIGHT_TOPICS,
+        done: chunkState.done,
+        continuationSummary: chunkState.continuationSummary,
+      });
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500, useWebSearch: false,
@@ -278,14 +343,28 @@ export default function SolarAnalyzer() {
           "\"zone_recommendations\":[{\"zone\":\"\",\"recommendation\":\"cite the actual exposure hours and the directions needing cover\"}]," +
           "\"energy_potential\":{\"viable_surfaces\":\"which surfaces on this site suit PV, given the computed sun path\",\"indicative_yield_note\":\"what the computed clear-sky insolation implies for generation per square metre of array, stated as an upper bound\",\"dual_use\":\"where shade structures could also carry PV\",\"caveat\":\"what a real yield assessment would require\"}," +
           "\"conclusion\":\"2-3 sentences naming the single highest-priority shade intervention\"}" +
-          checklistPrompt("SOL") + "\n\nCOMPUTED DATA:\n" + JSON.stringify(summary, null, 2),
+          checklistPrompt("SOL") + "\n\nCOMPUTED DATA:\n" + JSON.stringify(summary, null, 2) + chunkInstruction,
       });
       // extractJSON returns NULL on an unrecoverable reply - it does not throw.
       // Passing that null into state leaves the section silently empty.
       const parsedInsight = extractJSON(text);
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
-      setInsight(parsedInsight);
+      // Merge into accumulated state. mergeChunk enforces the invariants:
+      // never overwrite longer content with shorter, ignore invented keys,
+      // reject a false "completed" claim, preserve declared order.
+      const merged = mergeChunk(chunkState, {
+        sections: parsedInsight.sections || parsedInsight,
+        completed: parsedInsight.completed,
+        remaining: parsedInsight.remaining,
+        continuation_summary: parsedInsight.continuation_summary,
+      }, INSIGHT_TOPICS);
+      setChunkState(merged);
+      savePartial("SOL", merged);
+
+      // The report reads the flat object, so hand it the accumulated sections -
+      // a section generated on call 3 is indistinguishable from one on call 1.
+      setInsight({ ...parsedInsight, ...merged.sections });
       // Field-completeness guard. When the output budget runs short the model
       // drops the TAIL fields of a schema; the report then prints
       // "(not generated)" into those sections with nothing on screen to say
@@ -494,12 +573,38 @@ export default function SolarAnalyzer() {
               <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
                 <div className="mb-3">
-                  <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+                  <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
                     onReset={() => setTokenUsage(resetUsage("SOL"))} />
                 </div>
                 <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
-                  <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
+                  {insightLoading
+                    ? (chunkState.done.length ? "Continuing..." : "Generating...")
+                    : chunkState.done.length === 0
+                      ? "Generate AI Insight"
+                      : insightComplete
+                        ? "Regenerate AI Insight"
+                        : "Continue insight generation"}
                 </button>
+                {chunkState.done.length > 0 && !insightComplete && (
+                  <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+                    <strong>{chunkProgress.text}</strong>{" "}
+                    Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
+                    Still to generate: {chunkProgress.remainingLabels.join(", ")}.
+                    <div className="text-brand-muted mt-1">
+                      Nothing already generated is lost. You may switch to a different API key
+                      in Settings before continuing - the work so far is kept.
+                    </div>
+                  </div>
+                )}
+                {chunkState.done.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { clearPartial("SOL"); setChunkState(emptyState(INSIGHT_TOPICS)); setInsight(null); }}
+                    className="mt-2 text-xs underline text-brand-muted"
+                  >
+                    Discard partial insight and start over
+                  </button>
+                )}
               </div>
               {insightLoading && <p className="text-sm text-brand-text/60">Reading zone data and generating shade guidance...</p>}
               {insightWarning && !insightError && (

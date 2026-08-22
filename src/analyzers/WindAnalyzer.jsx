@@ -5,7 +5,11 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import TokenMeter from "../components/TokenMeter";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import {
+  buildChunkedPrompt, emptyState, mergeChunk, isComplete,
+  progressLabel, savePartial, loadPartial, clearPartial,
+} from "../utils/chunkedGeneration";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -22,6 +26,38 @@ export default function WindAnalyzer() {
   // usage is reported per tool so you can see which one is expensive.
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("WND"));
   const noteUsage = (u) => setTokenUsage(recordUsage("WND", u));
+  /*
+    CHUNKED INSIGHT (F13b). Not about generating LESS - about not losing
+    everything when the budget runs out mid-reply. The model returns only
+    sections it can COMPLETE and declares what remains; whatever arrives is
+    merged and kept, and the next call continues from there - on a different
+    API key if needed. maxTokens is untouched, so depth per section is unchanged.
+  */
+  const INSIGHT_TOPICS = [
+    { key: "zone_recommendations", label: "Zone recommendations" },
+    { key: "governing_criteria", label: "Governing criteria" },
+    { key: "extreme_events", label: "Extreme events" },
+    { key: "contextual_effects", label: "Contextual effects" },
+    { key: "conclusion", label: "Conclusion" },
+  ];
+  const [chunkState, setChunkState] = useState(() => loadPartial("WND", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
+  const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
+  const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Exact token count on demand. On a button, not automatic: the counting call
+  // still costs one REQUEST, and requests are the scarce resource on a free key.
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      const exact = await countTokensExact({ provider, apiKey, model,
+        systemText: "analysis system instruction and methodology checklist", userText: preview });
+      setExactEstimate(exact && exact.exact
+        ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
+        : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
+    } catch { setExactEstimate(null); } finally { setCounting(false); }
+  }
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -154,14 +190,32 @@ export default function WindAnalyzer() {
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500,
-        content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Also return: 'governing_criteria' (one sentence naming the comfort criteria actually applied and whether the project location publishes its own), 'extreme_events' (array of {event, likelihood, design_response} for storm/shamal/dust events documented for this region - empty array if none are documented), and 'contextual_effects' (array of {factor, applies (boolean), implication} covering effects such as downwash from adjacent tall buildings, channelling between blocks, and corner acceleration). Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"governing_criteria\": \"\", \"extreme_events\": [{\"event\": \"\", \"likelihood\": \"\", \"design_response\": \"\"}], \"contextual_effects\": [{\"factor\": \"\", \"applies\": true, \"implication\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("WND") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
+        content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Also return: 'governing_criteria' (one sentence naming the comfort criteria actually applied and whether the project location publishes its own), 'extreme_events' (array of {event, likelihood, design_response} for storm/shamal/dust events documented for this region - empty array if none are documented), and 'contextual_effects' (array of {factor, applies (boolean), implication} covering effects such as downwash from adjacent tall buildings, channelling between blocks, and corner acceleration). Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"governing_criteria\": \"\", \"extreme_events\": [{\"event\": \"\", \"likelihood\": \"\", \"design_response\": \"\"}], \"contextual_effects\": [{\"factor\": \"\", \"applies\": true, \"implication\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("WND") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2) + chunkInstruction,
       });
       // extractJSON returns NULL on an unrecoverable reply - it does not throw.
       // Passing that null into state leaves the section silently empty.
       const parsedInsight = extractJSON(text);
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
-      setInsight(parsedInsight);
+      // Merge into accumulated state - never overwrites longer content with
+
+      // shorter, ignores invented keys, rejects a false completion claim.
+
+     
+        // Tells the model what is already written (so it is not repeated) and what
+        // still needs writing. On a first run `done` is empty and this behaves
+        // exactly like a normal single-pass call.
+        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+ const _merged = mergeChunk(chunkState, { sections: parsedInsight.sections || parsedInsight,
+
+        completed: parsedInsight.completed, remaining: parsedInsight.remaining,
+
+        continuation_summary: parsedInsight.continuation_summary }, INSIGHT_TOPICS);
+
+      setChunkState(_merged); savePartial("WND", _merged);
+
+      setInsight({ ...parsedInsight, ..._merged.sections });
       // Field-completeness guard. When the output budget runs short the model
       // drops the TAIL fields of a schema; the report then prints
       // "(not generated)" into those sections with nothing on screen to say
@@ -376,12 +430,25 @@ export default function WindAnalyzer() {
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
             <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+              <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
                 onReset={() => setTokenUsage(resetUsage("WND"))} />
             </div>
             <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+                <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
+                Still to generate: {chunkProgress.remainingLabels.join(", ")}.
+                <div className="text-brand-muted mt-1">Nothing already generated is lost. You may switch API key first, then continue.</div>
+              </div>
+            )}
+            {chunkState.done.length > 0 && (
+              <button type="button" className="mt-2 text-xs underline text-brand-muted"
+                onClick={() => { clearPartial("WND"); setChunkState(emptyState(INSIGHT_TOPICS)); }}>
+                {insightComplete ? "Clear and start over" : "Discard partial insight and start over"}
+              </button>
+            )}
           </div>
           {insightLoading && <p className="text-sm text-brand-text/60">Reading zone data and generating wind guidance...</p>}
           {insightWarning && !insightError && (

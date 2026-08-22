@@ -33,7 +33,7 @@ export function parseClaudeResponse(data) {
   return "";
 }
 
-import { readProviderUsage, estimateTokens, recordRequest, readRateLimitHeaders, saveLiveLimits } from "./tokenMeter";
+import { readProviderUsage, estimateTokens, recordRequest, readRateLimitHeaders, saveLiveLimits, getLimits, requestWindows } from "./tokenMeter";
 
 /**
  * Reports token usage to the caller without changing any return contract.
@@ -41,9 +41,8 @@ import { readProviderUsage, estimateTokens, recordRequest, readRateLimitHeaders,
  * flagged, so the UI never presents a guess as a measurement.
  */
 function emitUsage(onUsage, data, { content, systemInstruction, text, provider }) {
-  // Request counting is GLOBAL and unconditional - rate limits are enforced per
-  // key, not per tool, and they apply whether or not a tool passes onUsage.
-  try { recordRequest(provider); } catch { /* accounting must never break a run */ }
+  // NOTE: the request itself is counted inside withRetry(), at the moment the
+  // fetch is issued. Counting here as well would double-count every call.
   if (typeof onUsage !== "function") return;
   try {
     const reported = readProviderUsage(data && (data.usage || data.usageMetadata));
@@ -83,6 +82,44 @@ function emitUsage(onUsage, data, { content, systemInstruction, text, provider }
 const RETRY_STATUSES = [529, 500, 502, 503, 504];
 const MAX_ATTEMPTS = 3;
 
+/**
+ * How many attempts are safe given what is left in the request budget.
+ *
+ * Retrying is only free when REQUESTS are plentiful. On a Gemini free key the
+ * binding limit is requests per minute (the observed 429 reported "limit: 20"),
+ * so three attempts per click turns one action into three units of the scarcest
+ * resource. That is how a handful of clicks produced twenty logged requests and
+ * a quota exhaustion.
+ */
+function attemptsAllowed(provider) {
+  try {
+    const lim = getLimits(provider);
+    const win = requestWindows(provider);
+    if (!lim.rpm) return MAX_ATTEMPTS;
+    const headroom = lim.rpm - win.lastMinute;
+    if (headroom <= 1) return 1;              // no budget to spend on retries
+    if (headroom <= 4) return 2;
+    return MAX_ATTEMPTS;
+  } catch {
+    return MAX_ATTEMPTS;
+  }
+}
+
+/**
+ * Providers say how long to wait. Gemini embeds it in the message
+ * ("Please retry in 35.863033314s"); both may send a Retry-After header.
+ * Honouring it beats guessing with exponential backoff.
+ */
+export function retryAfterSeconds(response, bodyText) {
+  try {
+    const h = response?.headers?.get?.("retry-after");
+    if (h && Number.isFinite(Number(h))) return Math.ceil(Number(h));
+    const m = String(bodyText || "").match(/retry in ([\d.]+)s/i);
+    if (m) return Math.ceil(Number(m[1]));
+  } catch { /* ignore */ }
+  return null;
+}
+
 function backoffDelay(attempt) {
   const base = 1000 * Math.pow(2, attempt);      // 1s, 2s, 4s
   return Math.round(base + Math.random() * 400); // jitter
@@ -95,16 +132,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * The thunk must return the Response; it is re-invoked from scratch each
  * attempt so no body stream is reused.
  */
-export async function withRetry(makeRequest, onAttempt) {
+export async function withRetry(makeRequest, onAttempt, provider) {
   let last = null;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  const maxAttempts = attemptsAllowed(provider);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Every attempt is a real HTTP request and the provider counts it against
+    // the rate limit whether it succeeds or not. Count it here, before we know
+    // the outcome, or the meter under-reports precisely when it matters.
+    try { recordRequest(provider); } catch { /* accounting must not break a run */ }
     const response = await makeRequest();
     if (response.ok || !RETRY_STATUSES.includes(response.status)) return response;
     last = response;
-    if (attempt < MAX_ATTEMPTS - 1) {
+    if (attempt < maxAttempts - 1) {
       const wait = backoffDelay(attempt);
       if (typeof onAttempt === "function") {
-        onAttempt({ attempt: attempt + 1, of: MAX_ATTEMPTS, status: response.status, waitMs: wait });
+        onAttempt({ attempt: attempt + 1, of: maxAttempts, status: response.status, waitMs: wait });
       }
       await sleep(wait);
     }
@@ -197,7 +239,7 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
   }
 
   async function send(body) {
-    const r = await withRetry(() => sendRaw(body), onRetry);
+    const r = await withRetry(() => sendRaw(body), onRetry, "gemini");
     return { r, data: await r.json().catch(() => ({})) };
   }
 
@@ -295,7 +337,7 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify(payload),
-  }), onRetry);
+  }), onRetry, "claude");
 
   // F8: read live quota off the response headers before touching the body.
   // Returns null when CORS has not exposed them, in which case the meter

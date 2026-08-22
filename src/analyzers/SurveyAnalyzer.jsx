@@ -7,7 +7,11 @@ import ReportPreview from "../components/ReportPreview";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import TokenMeter from "../components/TokenMeter";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import {
+  buildChunkedPrompt, emptyState, mergeChunk, isComplete,
+  progressLabel, savePartial, loadPartial, clearPartial,
+} from "../utils/chunkedGeneration";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -79,6 +83,36 @@ export default function SurveyAnalyzer() {
   // usage is reported per tool so you can see which one is expensive.
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("SUR"));
   const noteUsage = (u) => setTokenUsage(recordUsage("SUR", u));
+  /*
+    CHUNKED INSIGHT (F13b). Not about generating LESS - about not losing
+    everything when the budget runs out mid-reply. The model returns only
+    sections it can COMPLETE and declares what remains; whatever arrives is
+    merged and kept, and the next call continues from there - on a different
+    API key if needed. maxTokens is untouched, so depth per section is unchanged.
+  */
+  const INSIGHT_TOPICS = [
+    { key: "priority_ranking", label: "Priority ranking" },
+    { key: "conflicts", label: "Conflicts" },
+    { key: "overall_summary", label: "Overall summary" },
+  ];
+  const [chunkState, setChunkState] = useState(() => loadPartial("SUR", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
+  const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
+  const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Exact token count on demand. On a button, not automatic: the counting call
+  // still costs one REQUEST, and requests are the scarce resource on a free key.
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      const exact = await countTokensExact({ provider, apiKey, model,
+        systemText: "analysis system instruction and methodology checklist", userText: preview });
+      setExactEstimate(exact && exact.exact
+        ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
+        : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
+    } catch { setExactEstimate(null); } finally { setCounting(false); }
+  }
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -183,12 +217,30 @@ export default function SurveyAnalyzer() {
           "\"red_flags\":[\"data quality issues that limit interpretation\"]," +
           "\"overall_summary\":\"4-6 sentences of real analysis - what the responses collectively reveal about how this place fails its users today\"," +
           "\"conclusion\":\"the single clearest design action and why the evidence supports it\"}. " +
-          "CRITICAL RULES: derive themes from the responses themselves. Do NOT default to shade, accessibility and safety unless the data actually shows them. Report anything unusual or site-specific that respondents raised, and say whether each theme is actionable by design, by management, or outside the project's control. Never use groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw,
+          "CRITICAL RULES: derive themes from the responses themselves. Do NOT default to shade, accessibility and safety unless the data actually shows them. Report anything unusual or site-specific that respondents raised, and say whether each theme is actionable by design, by management, or outside the project's control. Never use groupings like 'Respondents 1-10'. Count how many responses genuinely support each theme. Quote real phrases from the data. Never invent a finding the responses do not support. Do not assume any particular country, city or project - analyse only what is in the data." + checklistPrompt("SUR") + "\n\nSURVEY RESPONSES:\n" + raw + chunkInstruction,
       });
       const parsedAnalysis = extractJSON(text);
       if (!parsedAnalysis) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
-      setAnalysis(parsedAnalysis);
+      // Merge into accumulated state - never overwrites longer content with
+
+      // shorter, ignores invented keys, rejects a false completion claim.
+
+     
+        // Tells the model what is already written (so it is not repeated) and what
+        // still needs writing. On a first run `done` is empty and this behaves
+        // exactly like a normal single-pass call.
+        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+ const _merged = mergeChunk(chunkState, { sections: parsedAnalysis.sections || parsedAnalysis,
+
+        completed: parsedAnalysis.completed, remaining: parsedAnalysis.remaining,
+
+        continuation_summary: parsedAnalysis.continuation_summary }, INSIGHT_TOPICS);
+
+      setChunkState(_merged); savePartial("SUR", _merged);
+
+      setAnalysis({ ...parsedAnalysis, ..._merged.sections });
       // Field-contract guard: say so plainly when the model omits expected keys,
       // rather than letting sections 8 and 10 print "(not generated)" silently.
       const gaps = missingFields(parsedAnalysis, ["themes", "overall_summary", "conclusion"]);
@@ -332,12 +384,27 @@ export default function SurveyAnalyzer() {
               {parsed.responseCount < 20 && <span className="text-brand-warning"> - small sample, treat patterns as indicative</span>}
             </p>
             <div className="mb-3">
-              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+              <TokenMeter usage={tokenUsage} estimate={exactEstimate || toolEstimate} provider={provider} onCalculate={calculateTokens} calculating={counting}
                 onReset={() => setTokenUsage(resetUsage("SUR"))} />
             </div>
             <button onClick={generateAnalysis} disabled={analysisLoading || !apiKey} className="btn-dark">
-              <Sparkles size={15} /> {analysisLoading ? "Analyzing..." : "Generate AI Insight"}
+              {chunkState.done.length === 0 ? "Generate AI Insight"
+                : insightComplete ? "Regenerate AI Insight"
+                : "Continue insight generation"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+                <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
+                Still to generate: {chunkProgress.remainingLabels.join(", ")}.
+                <div className="text-brand-muted mt-1">Nothing already generated is lost. You may switch API key first.</div>
+              </div>
+            )}
+            {chunkState.done.length > 0 && (
+              <button type="button" className="mt-2 text-xs underline text-brand-muted"
+                onClick={() => { clearPartial("SUR"); setChunkState(emptyState(INSIGHT_TOPICS)); }}>
+                Discard partial insight and start over
+              </button>
+            )}
           </div>
 
           {parsed.columns.filter((c) => c.type !== "text").map((c, i) => (

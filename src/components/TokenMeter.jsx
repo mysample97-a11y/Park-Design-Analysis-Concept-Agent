@@ -29,6 +29,8 @@ export default function TokenMeter({
   provider = "claude",
   partial = null,        // {done:[], remaining:[]} when a run stopped early
   onReset = null,
+  onCalculate = null,
+  calculating = false,
   compact = false,
 }) {
   const u = usage || { total: 0, calls: 0, estimated: false };
@@ -87,8 +89,17 @@ export default function TokenMeter({
           </div>
           {estimate && (
             <div style={{ fontSize: 10.5, color: "#5A5A5A" }}>
-              ~{formatTokens(estimate.input)} in · ~{formatTokens(estimate.output)} out
+              {estimate.exact ? "exact " : "~"}{formatTokens(estimate.input)} in · ~{formatTokens(estimate.output)} out
+              {estimate.exact ? " (counted by the provider)" : ""}
             </div>
+          )}
+          {onCalculate && (
+            <button type="button" onClick={onCalculate} disabled={calculating}
+              style={{ marginTop: 5, fontSize: 10.5, padding: "3px 8px", borderRadius: 5,
+                border: `1px solid ${st.bd}`, background: "#FFFFFF", color: "#3C3C3C",
+                cursor: calculating ? "default" : "pointer" }}>
+              {calculating ? "Counting…" : "Calculate exact tokens"}
+            </button>
           )}
         </div>
 

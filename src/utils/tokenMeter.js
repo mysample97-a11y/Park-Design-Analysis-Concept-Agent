@@ -300,9 +300,12 @@ export function resetRequests(provider) {
  * ========================================================================= */
 export const PUBLISHED_LIMITS = {
   gemini: {
-    free: { rpm: 15, rpd: 1500, tpm: 250000,
-            label: "Gemini free tier (Flash)",
-            caution: "Free-tier prompts may be used by Google to improve their products." },
+    free: { rpm: 20, rpd: 200, tpm: 250000,
+            label: "Gemini free tier (per model)",
+            caution: "Limits are PER MODEL and Google changes them without notice - a 429 from " +
+                     "this account reported 'generate_content_free_tier_requests, limit: 20'. " +
+                     "Check your own quota at ai.dev/rate-limit and edit these fields to match. " +
+                     "Free-tier prompts may also be used by Google to improve their products." },
     paid: { rpm: 150, rpd: null, tpm: 1000000, label: "Gemini paid (Tier 1)" },
   },
   claude: {

@@ -1,6 +1,8 @@
 import { useState, useEffect, createContext, useContext } from "react";
+import { getUsage } from "./utils/tokenMeter";
 import { Home, MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
 import Landing from "./components/Landing";
+import TokenRails from "./components/TokenRails";
 import SettingsPanel, { useApiKeys } from "./components/SettingsPanel";
 import SolarAnalyzer from "./analyzers/SolarAnalyzer";
 import SurveyAnalyzer from "./analyzers/SurveyAnalyzer";
@@ -28,6 +30,10 @@ export const AppContext = createContext(null);
  * Tools kept mounted once visited, so switching tabs never destroys work.
  * Registry form keeps the mount rule in one place rather than repeated per tool.
  */
+/** Tool code per tab, for the usage rail. */
+const TAB_TOOL_CODE = { site: "SCX", solar: "SOL", survey: "SUR", wind: "WND",
+  veg: "VEG", concept: "CPT", budget: "BDG", combined: "CMB" };
+
 const TOOL_PANELS = [
   { id: "site", Component: SiteContextAnalyzer },
   { id: "solar", Component: SolarAnalyzer },
@@ -49,6 +55,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("site");
   // Tools that have been opened at least once. Mount-once, keep-alive.
   const [visitedTabs, setVisitedTabs] = useState(() => new Set());
+  // Live usage for the rail. Polled rather than lifted through context so no
+  // tool has to be rewired; the store is localStorage and reads are cheap.
+  const [railUsage, setRailUsage] = useState(() => getUsage("SCX"));
+  useEffect(() => {
+    const code = TAB_TOOL_CODE[activeTab];
+    if (!code) return undefined;
+    const read = () => setRailUsage(getUsage(code));
+    read();
+    const id = setInterval(read, 2000);
+    return () => clearInterval(id);
+  }, [activeTab]);
   useEffect(() => {
     if (!activeTab) return;
     setVisitedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
@@ -287,13 +304,21 @@ export default function App() {
             display:none preserves component state, timers and scroll position.
             Do not swap it for conditional rendering to "tidy the DOM".
           */}
-          {TOOL_PANELS.map(({ id, Component }) =>
-            visitedTabs.has(id) ? (
-              <div key={id} style={{ display: activeTab === id ? "block" : "none" }}>
-                <Component />
-              </div>
-            ) : null
-          )}
+          <TokenRails
+            provider={provider}
+            usage={railUsage}
+            estimate={null}
+            partial={null}
+            onReset={null}
+          >
+            {TOOL_PANELS.map(({ id, Component }) =>
+              visitedTabs.has(id) ? (
+                <div key={id} style={{ display: activeTab === id ? "block" : "none" }}>
+                  <Component />
+                </div>
+              ) : null
+            )}
+          </TokenRails>
         </main>
 
         <footer className="border-t border-brand-border bg-white py-4 text-center text-[10px] text-brand-text/50">
