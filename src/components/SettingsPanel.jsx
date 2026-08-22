@@ -122,11 +122,13 @@ import { getLimits, saveLimits, PUBLISHED_LIMITS, requestWindows, resetRequests 
  */
 function TierLimits({ provider }) {
   const [lim, setLim] = useState(() => getLimits(provider));
-  const [win, setWin] = useState(() => requestWindows());
+  const [win, setWin] = useState(() => requestWindows(provider));
+  // Uncommitted keystrokes. Absent key => show the saved value.
+  const [draft, setDraft] = useState({});
 
-  useEffect(() => { setLim(getLimits(provider)); }, [provider]);
+  useEffect(() => { setLim(getLimits(provider)); setWin(requestWindows(provider)); setDraft({}); }, [provider]);
   useEffect(() => {
-    const id = setInterval(() => setWin(requestWindows()), 5000);
+    const id = setInterval(() => setWin(requestWindows(provider)), 5000);
     return () => clearInterval(id);
   }, []);
 
@@ -161,15 +163,28 @@ function TierLimits({ provider }) {
           ["rpd", "Requests / day"],
           ["tpm", "Tokens / min"],
         ].map(([k, label]) => (
-          <label key={k} className="text-[11px] text-brand-muted">
-            {label}
+          <label
+            key={k}
+            className="text-[11px] text-brand-muted border border-brand-border rounded-md p-2 bg-white block"
+          >
+            <span className="block mb-1 font-medium text-brand-text">{label}</span>
             <input
               type="number"
               min="0"
-              value={lim[k] == null ? "" : lim[k]}
+              // Controlled by a LOCAL draft string, not by saved state. Binding
+              // straight to saved state made the field impossible to clear: an
+              // empty box saved as null, getLimits() substituted the published
+              // default, and the digit reappeared before the next keystroke.
+              value={draft[k] ?? (lim[k] == null ? "" : String(lim[k]))}
               placeholder={published[lim.tier][k] == null ? "no limit" : String(published[lim.tier][k])}
-              onChange={(e) => apply({ [k]: e.target.value })}
-              className="input-field w-full mt-0.5"
+              onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+              onBlur={() => {
+                const raw = draft[k];
+                if (raw === undefined) return;
+                apply({ [k]: raw === "" ? null : raw });
+                setDraft((d) => { const n = { ...d }; delete n[k]; return n; });
+              }}
+              className="input-field w-full border border-brand-border rounded px-2 py-1"
             />
           </label>
         ))}
@@ -178,7 +193,7 @@ function TierLimits({ provider }) {
       <p className="text-[11px] text-brand-muted">
         Requests used: <strong>{win.lastMinute}</strong> in the last minute,{" "}
         <strong>{win.lastDay}</strong> in the last 24 hours.{" "}
-        <button type="button" onClick={() => setWin(resetRequests())}
+        <button type="button" onClick={() => setWin(resetRequests(provider))}
           className="underline">reset</button>
       </p>
 
@@ -290,19 +305,6 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* 3 — NOTES & LIMITATIONS */}
-        <div id="sp-limits" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
-          <h3 className="font-semibold text-brand-dark text-sm">API tier and limits</h3>
-          <p className="text-[11px] text-brand-muted">
-            Used by the token meter on each tool to warn you BEFORE a run runs out.
-            Request limits matter more than token limits here: a free Gemini key allows
-            around 250,000 tokens per minute but only about 15 requests per minute and
-            1,500 per day, so it is almost always the request count that stops a run.
-          </p>
-          <TierLimits provider="claude" />
-          <div className="h-px bg-brand-border my-2" />
-          <TierLimits provider="gemini" />
-        </div>
-
         <div id="sp-notes" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
           <label className="flex items-start gap-2 cursor-pointer">
             <input type="checkbox" checked={!!grounding} onChange={(e) => saveGrounding(e.target.checked)} className="mt-0.5" />
@@ -441,6 +443,20 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
             <p className="text-[10px] text-brand-text/60 mt-1">Edit this if Anthropic renames the model. Leave as-is unless you get a "model not found" error.</p>
           </div>
         </div>
+
+        <div id="sp-limits" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
+          <h3 className="font-semibold text-brand-dark text-sm">API tier and limits</h3>
+          <p className="text-[11px] text-brand-muted">
+            Used by the token meter on each tool to warn you BEFORE a run runs out.
+            Request limits matter more than token limits here: a free Gemini key allows
+            around 250,000 tokens per minute but only about 15 requests per minute and
+            1,500 per day, so it is almost always the request count that stops a run.
+          </p>
+          <TierLimits provider="claude" />
+          <div className="h-px bg-brand-border my-2" />
+          <TierLimits provider="gemini" />
+        </div>
+
 
         {/* Gemini Key */}
         <div className="border border-brand-border rounded-lg p-4 space-y-1.5">

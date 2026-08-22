@@ -84,6 +84,10 @@ export default function WindAnalyzer() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
+  // Partial success is NOT failure. A dropped tail field means some sections
+  // will be thin - the rest of the report is valid and must not be presented
+  // as a failed run.
+  const [insightWarning, setInsightWarning] = useState("");
 
   function addZone() { setZones([...zones, { id: uid(), name: "", wantsCooling: true, hasScreening: false }]); }
   function updateZone(id, patch) { setZones(zones.map((z) => (z.id === id ? { ...z, ...patch } : z))); }
@@ -136,7 +140,7 @@ export default function WindAnalyzer() {
   }
 
   async function generateInsight() {
-    setInsightLoading(true); setInsight(null); setInsightError("");
+    setInsightLoading(true); setInsightWarning(""); setInsight(null); setInsightError("");
     const summary = {
       site: location || meta?.siteDescription || meta?.projectName || "(location not stated)",
       wind_reference: SEASONS,
@@ -162,7 +166,7 @@ export default function WindAnalyzer() {
       // why. Keys are taken from THIS tool's own prompt so the check cannot
       // drift away from the contract it is checking.
       const gaps = missingFields(parsedInsight, ["zone_recommendations", "governing_criteria", "extreme_events", "contextual_effects", "conclusion"]);
-      if (gaps.length) setInsightError(missingFieldsNote(gaps));
+      setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -357,6 +361,11 @@ export default function WindAnalyzer() {
             </button>
           </div>
           {insightLoading && <p className="text-sm text-brand-text/60">Reading zone data and generating wind guidance...</p>}
+          {insightWarning && !insightError && (
+            <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+              <strong>Partly generated.</strong> {insightWarning}
+            </div>
+          )}
           {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
           {insight && (<div className="space-y-1.5">{(insight.zone_recommendations || []).map((r, i) => (<p key={i} className="text-sm text-[#3A362C]"><span className="font-semibold">{r.zone}</span>: {r.recommendation}</p>))}</div>)}
           {!insight && !insightLoading && !insightError && <p className="text-sm text-brand-text/60">Name your zones above, mark cooling/screening intent, then generate wind-design guidance.</p>}

@@ -35,7 +35,7 @@ export default function TokenMeter({
   const estTotal = estimate ? estimate.total : 0;
   // Requests are checked first: RPM/RPD is the dimension that actually stops a
   // run on a free key, and a token-only verdict would show false headroom.
-  const win = requestWindows();
+  const win = requestWindows(provider);
   const lim = getLimits(provider);
   const capacity = capacityCheck(provider, estimate);
   const outlook = capacity.level === "low" ? runOutlook(estTotal, u) : capacity;

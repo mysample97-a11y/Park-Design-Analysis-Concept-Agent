@@ -40,10 +40,10 @@ import { readProviderUsage, estimateTokens, recordRequest, readRateLimitHeaders,
  * If the provider reported nothing, an estimate is supplied and clearly
  * flagged, so the UI never presents a guess as a measurement.
  */
-function emitUsage(onUsage, data, { content, systemInstruction, text }) {
+function emitUsage(onUsage, data, { content, systemInstruction, text, provider }) {
   // Request counting is GLOBAL and unconditional - rate limits are enforced per
   // key, not per tool, and they apply whether or not a tool passes onUsage.
-  try { recordRequest(); } catch { /* accounting must never break a run */ }
+  try { recordRequest(provider); } catch { /* accounting must never break a run */ }
   if (typeof onUsage !== "function") return;
   try {
     const reported = readProviderUsage(data && (data.usage || data.usageMetadata));
@@ -232,7 +232,7 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
 
   const text = parseGeminiResponse(data);
   if (!text) throw new Error("Gemini returned an empty response. Try again.");
-  emitUsage(onUsage, data, { content, systemInstruction, text });
+  emitUsage(onUsage, data, { content, systemInstruction, text, provider: "gemini" });
   return text;
 }
 
@@ -308,7 +308,7 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   }
   const text = parseClaudeResponse(data);
   if (!text) throw new Error("The AI returned no analyzable text (it may have only performed search steps). Try again.");
-  emitUsage(onUsage, data, { content, systemInstruction, text });
+  emitUsage(onUsage, data, { content, systemInstruction, text, provider: "claude" });
   return text;
 }
 

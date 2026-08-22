@@ -108,6 +108,10 @@ export default function SolarAnalyzer() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
+  // Partial success is NOT failure. A dropped tail field means some sections
+  // will be thin - the rest of the report is valid and must not be presented
+  // as a failed run.
+  const [insightWarning, setInsightWarning] = useState("");
 
   const activePreset = DATE_PRESETS.find((p) => p.id === preset);
   const dayData = siteInfo ? buildDayData(activePreset.month, activePreset.day, siteInfo.lat, siteInfo.lon, siteInfo.utc_offset) : [];
@@ -225,7 +229,7 @@ export default function SolarAnalyzer() {
 
   async function generateInsight() {
     if (!siteInfo) { setInsightError("Set a project location above first."); return; }
-    setInsightLoading(true); setInsight(null); setInsightError("");
+    setInsightLoading(true); setInsightWarning(""); setInsight(null); setInsightError("");
     const named = zones.filter((z) => z.name.trim());
     const summary = {
       date_analyzed: activePreset.label,
@@ -288,7 +292,7 @@ export default function SolarAnalyzer() {
       // why. Keys are taken from THIS tool's own prompt so the check cannot
       // drift away from the contract it is checking.
       const gaps = missingFields(parsedInsight, ["shade_strategy", "zone_recommendations", "conclusion"]);
-      if (gaps.length) setInsightError(missingFieldsNote(gaps));
+      setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
     finally { setInsightLoading(false); }
   }
@@ -498,6 +502,11 @@ export default function SolarAnalyzer() {
                 </button>
               </div>
               {insightLoading && <p className="text-sm text-brand-text/60">Reading zone data and generating shade guidance...</p>}
+              {insightWarning && !insightError && (
+                <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+                  <strong>Partly generated.</strong> {insightWarning}
+                </div>
+              )}
               {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
               {insight && (<div className="space-y-1.5">{(insight.zone_recommendations || []).map((r, i) => (<p key={i} className="text-sm text-[#3A362C]"><span className="font-semibold">{r.zone}</span>: {r.recommendation}</p>))}</div>)}
               {!insight && !insightLoading && !insightError && <p className="text-sm text-brand-text/60">Name your zones above, mark what's already shaded, then generate zone-specific shade recommendations.</p>}

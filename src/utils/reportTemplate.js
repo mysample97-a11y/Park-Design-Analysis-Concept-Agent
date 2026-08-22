@@ -474,7 +474,23 @@ export function buildStructuredReport({
   L.push("");
 
   L.push("[10] CONCLUSIONS AND RECOMMENDATIONS");
-  if (conclusions.length) conclusions.forEach((c) => L.push(`  - ${sanitiseNarrative(String(c), stripped)}`));
+  if (conclusions.length) {
+    // Two different kinds of statement were being emitted into one flat list:
+    // assessments against a target, and actions to take. Rendered together they
+    // read as the same point stated twice. Split them under sub-headings.
+    const clean = conclusions.map((c) => sanitiseNarrative(String(c), stripped));
+    const assessments = clean.filter((c) => /\btarget\b|\bbenchmark\b|Fails|meets |Exposed for/i.test(c));
+    const actions = clean.filter((c) => !assessments.includes(c));
+    if (assessments.length) {
+      L.push("  10.1  ASSESSMENT AGAINST TARGETS");
+      assessments.forEach((c) => L.push(`       - ${c}`));
+      L.push("");
+    }
+    if (actions.length) {
+      L.push(assessments.length ? "  10.2  RECOMMENDED ACTIONS" : "  10.1  RECOMMENDED ACTIONS");
+      actions.forEach((c) => L.push(`       - ${c}`));
+    }
+  }
   else L.push("  (not generated)");
   L.push("");
 

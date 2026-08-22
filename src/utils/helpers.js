@@ -12,8 +12,35 @@ export function fileToBase64(file) {
 }
 
 /** Returns just the base64 payload (no data: prefix) - needed for PDF document blocks */
-export function fileToBase64Raw(file) {
-  return fileToBase64(file).then((dataUrl) => (dataUrl && dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl));
+/**
+ * F26 - IMAGE DOWNSCALING BEFORE UPLOAD.
+ *
+ * Used by every tool that accepts an image, so the saving applies across the
+ * whole app rather than one analyzer.
+ *
+ * A phone photo is commonly 4000px and several megabytes; base64 encoding adds
+ * a further third. That payload is slow to send, expensive in input tokens, and
+ * materially more likely to meet a provider overload (HTTP 529) mid-request -
+ * which is exactly the "model is currently experiencing high demand" failure
+ * seen when uploading a GIS map image to Site Context.
+ *
+ * Map and document text remains legible at 1500px on the long edge, so the
+ * resize costs almost nothing in accuracy and typically removes 80-90% of the
+ * bytes. Non-images and any failure fall through to the original encoding: a
+ * failed optimisation must never block an upload the user asked for.
+ */
+export async function fileToBase64Raw(file) {
+  try {
+    if (file && typeof file.type === "string" && file.type.startsWith("image/")) {
+      const { downscaleImage } = await import("./localDocRead");
+      const r = await downscaleImage(file);
+      if (r && r.base64) return r.base64;
+    }
+  } catch {
+    /* fall through */
+  }
+  const dataUrl = await fileToBase64(file);
+  return dataUrl && dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
 }
 
 /** Unique ID Generator */

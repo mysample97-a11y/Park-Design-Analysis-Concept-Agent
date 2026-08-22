@@ -71,6 +71,10 @@ export default function VegetationAnalyzer() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
+  // Partial success is NOT failure. A dropped tail field means some sections
+  // will be thin - the rest of the report is valid and must not be presented
+  // as a failed run.
+  const [insightWarning, setInsightWarning] = useState("");
 
   const filteredPalette = PLANT_PALETTE.filter((p) => waterFilter === "all" || p.water === waterFilter);
 
@@ -125,7 +129,7 @@ export default function VegetationAnalyzer() {
   }
 
   async function generateInsight() {
-    setInsightLoading(true); setInsight(null); setInsightError("");
+    setInsightLoading(true); setInsightWarning(""); setInsight(null); setInsightError("");
     const summary = {
       site: location || meta?.siteDescription || meta?.projectName || "(location not stated)",
       terrain_reference: terrainNote || "No survey-grade terrain data supplied. Terrain characteristics should be confirmed against site survey before reliance.",
@@ -157,7 +161,7 @@ export default function VegetationAnalyzer() {
       // why. Keys are taken from THIS tool's own prompt so the check cannot
       // drift away from the contract it is checking.
       const gaps = missingFields(parsedInsight, ["terrain_soil_note", "inventory_guidance", "suggested_species", "existing_value", "existing_vegetation", "conclusion"]);
-      if (gaps.length) setInsightError(missingFieldsNote(gaps));
+      setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -333,6 +337,11 @@ export default function VegetationAnalyzer() {
             </button>
           </div>
           {insightLoading && <p className="text-sm text-brand-text/60">Reviewing site context, inventory, and reference palette...</p>}
+          {insightWarning && !insightError && (
+            <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+              <strong>Partly generated.</strong> {insightWarning}
+            </div>
+          )}
           {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
           {insight && (
             <div className="space-y-3 text-sm text-[#3A362C]">

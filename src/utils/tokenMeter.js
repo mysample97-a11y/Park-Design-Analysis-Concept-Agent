@@ -223,13 +223,24 @@ export default {
  * the minute).
  * ========================================================================= */
 
-const REQ_KEY = "as2p_requests_v1";
+const REQ_KEY_BASE = "as2p_requests_v1";
+
+/**
+ * Rate limits are enforced per PROVIDER ACCOUNT, so the counter must be keyed by
+ * provider. The first version used one global bucket, which meant a Gemini call
+ * incremented the Anthropic panel as well - the counts were real but attributed
+ * to the wrong account, which is worse than not showing them.
+ */
+function reqKey(provider) {
+  const p = String(provider || "claude").toLowerCase().includes("gemini") ? "gemini" : "claude";
+  return REQ_KEY_BASE + "_" + p;
+}
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
 
-function readReq() {
+function readReq(provider) {
   try {
-    const raw = localStorage.getItem(REQ_KEY);
+    const raw = localStorage.getItem(reqKey(provider));
     const arr = raw ? JSON.parse(raw) : [];
     return Array.isArray(arr) ? arr.filter((t) => typeof t === "number") : [];
   } catch {
@@ -237,9 +248,9 @@ function readReq() {
   }
 }
 
-function writeReq(list) {
+function writeReq(provider, list) {
   try {
-    localStorage.setItem(REQ_KEY, JSON.stringify(list));
+    localStorage.setItem(reqKey(provider), JSON.stringify(list));
   } catch {
     /* never fail a run over accounting */
   }
@@ -250,16 +261,16 @@ function writeReq(list) {
  * Request limits are per KEY, not per tool, so this counter is global across
  * the whole app - unlike token usage, which is reported per tool.
  */
-export function recordRequest(now = Date.now()) {
-  const list = readReq().filter((t) => now - t < DAY_MS);
+export function recordRequest(provider, now = Date.now()) {
+  const list = readReq(provider).filter((t) => now - t < DAY_MS);
   list.push(now);
-  writeReq(list);
-  return requestWindows(now, list);
+  writeReq(provider, list);
+  return requestWindows(provider, now, list);
 }
 
 /** Requests used in the trailing minute and trailing 24 hours. */
-export function requestWindows(now = Date.now(), preloaded = null) {
-  const list = (preloaded || readReq()).filter((t) => now - t < DAY_MS);
+export function requestWindows(provider, now = Date.now(), preloaded = null) {
+  const list = (preloaded || readReq(provider)).filter((t) => now - t < DAY_MS);
   return {
     lastMinute: list.filter((t) => now - t < MIN_MS).length,
     lastDay: list.length,
@@ -272,8 +283,8 @@ export function requestWindows(now = Date.now(), preloaded = null) {
   };
 }
 
-export function resetRequests() {
-  writeReq([]);
+export function resetRequests(provider) {
+  writeReq(provider, []);
   return { lastMinute: 0, lastDay: 0, nextMinuteSlotIn: 0 };
 }
 
@@ -360,7 +371,7 @@ export function saveLimits(provider, { tier, rpm, rpd, tpm } = {}) {
  */
 export function capacityCheck(provider, estimate, now = Date.now()) {
   const lim = getLimits(provider);
-  const win = requestWindows(now);
+  const win = requestWindows(provider, now);
   const est = (estimate && estimate.total) || 0;
   const calls = (estimate && estimate.calls) || 1;
 
