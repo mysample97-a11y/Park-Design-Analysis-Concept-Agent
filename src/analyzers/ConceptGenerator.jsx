@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -9,7 +11,7 @@ import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML } from "../utils/helpers";
 import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, bubbleDiagramSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, bubbleDiagramSVG, tableHTML, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 
 const POSITIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "Center"];
 const GRID_ORDER = ["NW", "N", "NE", "W", "Center", "E", "SW", "S", "SE"];
@@ -31,6 +33,7 @@ function BubbleDiagram({ zones }) {
   const byPos = {};
   GRID_ORDER.forEach((p) => (byPos[p] = []));
   zones.forEach((z) => { const pos = POSITIONS.includes(z.position) ? z.position : "Center"; byPos[pos].push(z); });
+
   return (
     <div className="grid grid-cols-3 gap-1.5" style={{ minHeight: 260 }}>
       {GRID_ORDER.map((pos) => (
@@ -53,6 +56,13 @@ function BubbleDiagram({ zones }) {
 export default function ConceptGenerator() {
   const { provider, apiKey, meta } = useAppContext();
   const [brief, setBrief] = useState("");
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("CPT"));
+  // Pre-flight estimate not yet wired for this tool. null is deliberate:
+  // the meter shows "-" rather than a fabricated figure.
+  const toolEstimate = null;
+  const noteUsage = (u) => setTokenUsage(recordUsage("CPT", u));
   // File ingestion. This tool previously accepted pasted text ONLY, so a user had to
   // open an exported report, select all, copy and paste it in by hand - for every run.
   const [briefFileNote, setBriefFileNote] = useState("");
@@ -66,6 +76,7 @@ export default function ConceptGenerator() {
       "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
       "same content, read instantly, and need no key at all.");
     return await callAI({
+        onUsage: noteUsage,
       // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
       // passing `model` threw "model is not defined" the moment a file was uploaded.
       provider, apiKey, maxTokens: 3000,
@@ -116,6 +127,7 @@ export default function ConceptGenerator() {
     setCtxLoading(true); setCtxError("");
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 2200, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
@@ -168,6 +180,7 @@ export default function ConceptGenerator() {
         setProgress(`Generating concept ${ci} of ${numConcepts}${existing.length ? " (keeping " + existing.length + " already generated)" : ""}...`);
         const prior = built.map((c) => c.name).filter(Boolean);
         const text = await callAI({
+        onUsage: noteUsage,
           provider, apiKey, maxTokens: 4000,
           content:
             "You are a landscape architecture concept-design assistant. Given the site analysis findings and " +
@@ -236,6 +249,7 @@ export default function ConceptGenerator() {
         strengths: c.strengths, weaknesses: c.weaknesses,
       }));
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 1400,
         content:
           "Given these scored park design concepts, recommend which to move forward with. " +
@@ -465,6 +479,10 @@ export default function ConceptGenerator() {
               Clear concepts and start again
             </button>
           )}
+          <div className="mb-3">
+            <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+              onReset={() => setTokenUsage(resetUsage("CPT"))} />
+          </div>
           <button onClick={generateConcepts} disabled={loading || !apiKey} className="btn-gold w-full disabled:opacity-60">
             {loading
               ? <span className="inline-block w-[18px] h-[18px] border-2 border-brand-dark/30 border-t-brand-dark rounded-full animate-spin" />

@@ -106,6 +106,92 @@ export function useApiKeys() {
   return { keys, models, meta, grounding, loaded, saveKey, saveModel, saveMeta, saveGrounding, clearAll, getActiveKey, getActiveModel };
 }
 
+import { getLimits, saveLimits, PUBLISHED_LIMITS, requestWindows, resetRequests } from "../utils/tokenMeter";
+
+/**
+ * API TIER AND LIMITS  (F11)
+ *
+ * The token meter needs a ceiling to measure against. Anthropic returns exact
+ * remaining quota in response headers, but Gemini does not, and neither exposes
+ * a lifetime budget - so where the provider will not tell us, the user does.
+ *
+ * The published figures below are SEEDS, not assertions. Provider limits move:
+ * Google cut free-tier quotas in December 2025 and removed the Pro models from
+ * the free tier in April 2026. Every field stays editable and the panel says
+ * plainly that the values are user-declared.
+ */
+function TierLimits({ provider }) {
+  const [lim, setLim] = useState(() => getLimits(provider));
+  const [win, setWin] = useState(() => requestWindows());
+
+  useEffect(() => { setLim(getLimits(provider)); }, [provider]);
+  useEffect(() => {
+    const id = setInterval(() => setWin(requestWindows()), 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const p = String(provider).toLowerCase().includes("gemini") ? "gemini" : "claude";
+  const published = PUBLISHED_LIMITS[p];
+
+  const apply = (patch) => setLim(saveLimits(p, { ...lim, ...patch }));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        {["free", "paid"].map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => apply({ tier: t, rpm: null, rpd: null, tpm: null })}
+            className={`px-3 py-1.5 rounded border text-xs ${
+              lim.tier === t
+                ? "bg-brand-dark text-white border-brand-dark"
+                : "border-brand-border text-brand-text"
+            }`}
+          >
+            {t === "free" ? "Free tier" : "Paid tier"}
+          </button>
+        ))}
+        <span className="text-[11px] text-brand-muted self-center">{lim.label}</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          ["rpm", "Requests / min"],
+          ["rpd", "Requests / day"],
+          ["tpm", "Tokens / min"],
+        ].map(([k, label]) => (
+          <label key={k} className="text-[11px] text-brand-muted">
+            {label}
+            <input
+              type="number"
+              min="0"
+              value={lim[k] == null ? "" : lim[k]}
+              placeholder={published[lim.tier][k] == null ? "no limit" : String(published[lim.tier][k])}
+              onChange={(e) => apply({ [k]: e.target.value })}
+              className="input-field w-full mt-0.5"
+            />
+          </label>
+        ))}
+      </div>
+
+      <p className="text-[11px] text-brand-muted">
+        Requests used: <strong>{win.lastMinute}</strong> in the last minute,{" "}
+        <strong>{win.lastDay}</strong> in the last 24 hours.{" "}
+        <button type="button" onClick={() => setWin(resetRequests())}
+          className="underline">reset</button>
+      </p>
+
+      <p className="text-[11px] text-brand-muted">
+        {lim.isDefault
+          ? "Showing published defaults for this tier. These are seeds only - provider limits change, so edit them to match what your account actually shows."
+          : "Using your declared limits."}
+        {lim.caution ? " " + lim.caution : ""}
+      </p>
+    </div>
+  );
+}
+
 export default function SettingsPanel({ keys, models, meta, grounding, saveKey, saveModel, saveMeta, saveGrounding, clearAll, onClose, focus }) {
   // The landing page can open this panel straight to a section.
   useEffect(() => {
@@ -204,6 +290,19 @@ export default function SettingsPanel({ keys, models, meta, grounding, saveKey, 
         </div>
 
         {/* 3 — NOTES & LIMITATIONS */}
+        <div id="sp-limits" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
+          <h3 className="font-semibold text-brand-dark text-sm">API tier and limits</h3>
+          <p className="text-[11px] text-brand-muted">
+            Used by the token meter on each tool to warn you BEFORE a run runs out.
+            Request limits matter more than token limits here: a free Gemini key allows
+            around 250,000 tokens per minute but only about 15 requests per minute and
+            1,500 per day, so it is almost always the request count that stops a run.
+          </p>
+          <TierLimits provider="claude" />
+          <div className="h-px bg-brand-border my-2" />
+          <TierLimits provider="gemini" />
+        </div>
+
         <div id="sp-notes" className="border border-brand-border rounded-lg p-4 space-y-2 scroll-mt-4">
           <label className="flex items-start gap-2 cursor-pointer">
             <input type="checkbox" checked={!!grounding} onChange={(e) => saveGrounding(e.target.checked)} className="mt-0.5" />

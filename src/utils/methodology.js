@@ -35,19 +35,19 @@ export const CHECKLISTS = {
   SCX: {
     intro: "A professional site analysis is expected to cover the following. Determine which apply to THIS location, and for each, report what is actually documented for this jurisdiction.",
     items: [
-      { c: "Adjacent land use on every edge, and the demand each generates", src: "ARCON" },
-      { c: "Access, arrival points, public transport and vehicular approach", src: "ARCON" },
-      { c: "Pedestrian and cycle circulation, and their separation", src: "ARCON" },
-      { c: "Accessibility standards that legally govern at this location", src: "ARCON + project" },
-      { c: "Flood risk and surface water drainage", src: "ARCON" },
-      { c: "Water table depth and groundwater conditions", src: "ARCON" },
-      { c: "Soil contamination and previous site use", src: "ARCON" },
-      { c: "Seismic, subsidence or other geotechnical hazard", src: "ARCON" },
-      { c: "Topography, gradients and level change", src: "ARCON" },
-      { c: "Existing structures, services and utilities on or crossing the site", src: "ARCON" },
-      { c: "Noise, pollution and other environmental nuisance from adjacencies", src: "ARCON" },
-      { c: "Views, orientation and visual character", src: "ARCON" },
-      { c: "Statutory designations: heritage, conservation, protected trees, planning constraints", src: "ARCON" },
+      { c: "Adjacent land use on every edge, and the demand each generates", src: "professional site-analysis practice" },
+      { c: "Access, arrival points, public transport and vehicular approach", src: "professional site-analysis practice" },
+      { c: "Pedestrian and cycle circulation, and their separation", src: "professional site-analysis practice" },
+      { c: "Accessibility standards that legally govern at this location", src: "professional site-analysis practice + project brief" },
+      { c: "Flood risk and surface water drainage", src: "professional site-analysis practice" },
+      { c: "Water table depth and groundwater conditions", src: "professional site-analysis practice" },
+      { c: "Soil contamination and previous site use", src: "professional site-analysis practice" },
+      { c: "Seismic, subsidence or other geotechnical hazard", src: "professional site-analysis practice" },
+      { c: "Topography, gradients and level change", src: "professional site-analysis practice" },
+      { c: "Existing structures, services and utilities on or crossing the site", src: "professional site-analysis practice" },
+      { c: "Noise, pollution and other environmental nuisance from adjacencies", src: "professional site-analysis practice" },
+      { c: "Views, orientation and visual character", src: "professional site-analysis practice" },
+      { c: "Statutory designations: heritage, conservation, protected trees, planning constraints", src: "professional site-analysis practice" },
       { c: "Occupancy or capacity expectations for this facility type", src: "project" },
     ],
     rules: [
@@ -62,10 +62,10 @@ export const CHECKLISTS = {
       { c: "Sun position across representative days of the year", src: "NOAA" },
       { c: "Solar insolation in kWh/m2 - the metric professional practice reports", src: "ASHRAE / industry" },
       { c: "Shadow geometry consequences for shading device selection", src: "industry" },
-      { c: "Shade coverage requirements by space type", src: "Delhi UAC" },
+      { c: "Shade coverage requirements by space type", src: "published park design guidance" },
       { c: "Seasonal variation and the differing demands of each season", src: "industry" },
       { c: "Thermal comfort implications, qualitatively derived", src: "industry" },
-      { c: "Orientation guidance for heat-sensitive uses", src: "Delhi UAC" },
+      { c: "Orientation guidance for heat-sensitive uses", src: "published park design guidance" },
       { c: "Solar energy generation potential from the computed insolation - which surfaces are viable, indicative array area, and what that could offset", src: "industry" },
       { c: "Where shade structures could double as PV canopies", src: "industry" },
     ],
@@ -104,14 +104,14 @@ export const CHECKLISTS = {
   VEG: {
     intro: "A professional planting and ground-conditions assessment is expected to cover the following.",
     items: [
-      { c: "Existing vegetation: species, approximate numbers, condition, and a clear retain / relocate / remove position for each with the reason", src: "ARCON" },
+      { c: "Existing vegetation: species, approximate numbers, condition, and a clear retain / relocate / remove position for each with the reason", src: "professional site-analysis practice" },
       { c: "Value of what already exists - mature canopy, habitat, screening, identity - and what would be lost by removing it", src: "industry" },
       { c: "Native and climate-adapted species appropriate to this location", src: "industry" },
       { c: "Water demand and irrigation implications", src: "industry" },
       { c: "Minimum rootable soil volume for canopy trees", src: "industry" },
-      { c: "Soil conditions, compaction and drainage", src: "ARCON" },
-      { c: "Topography and terrain", src: "ARCON" },
-      { c: "Canopy contribution to shade and thermal comfort", src: "Delhi UAC" },
+      { c: "Soil conditions, compaction and drainage", src: "professional site-analysis practice" },
+      { c: "Topography and terrain", src: "professional site-analysis practice" },
+      { c: "Canopy contribution to shade and thermal comfort", src: "published park design guidance" },
       { c: "Biodiversity and habitat value", src: "industry" },
       { c: "Maintenance burden over the planting's life", src: "industry" },
     ],
@@ -146,9 +146,9 @@ export const CHECKLISTS = {
     items: [
       { c: "Each zone traceable to a specific analytical finding", src: "industry" },
       { c: "Spatial organisation genuinely differing between options", src: "industry" },
-      { c: "Circulation and accessibility integral to the layout", src: "ARCON" },
-      { c: "Shade and microclimate response", src: "Delhi UAC" },
-      { c: "Play and vehicular separation where children are provided for", src: "Delhi UAC" },
+      { c: "Circulation and accessibility integral to the layout", src: "professional site-analysis practice" },
+      { c: "Shade and microclimate response", src: "published park design guidance" },
+      { c: "Play and vehicular separation where children are provided for", src: "published park design guidance" },
       { c: "Facility schedule sufficient for cost estimating", src: "RICS NRM1" },
       { c: "Comparative scoring against stated criteria", src: "industry" },
     ],
@@ -190,19 +190,48 @@ export const CHECKLISTS = {
   },
 };
 
+/**
+ * The single most important instruction in this file.
+ *
+ * The bracketed source on each checklist item explains WHY the item is in scope.
+ * It does NOT mean that body sets the value, and it usually has no authority at
+ * the project location. An earlier build rendered these as "[expected by: X]",
+ * and the model duly wrote "80% shade (Delhi Urban Art Commission)" into the
+ * findings of a report for a site in Dubai. A reviewer in that jurisdiction
+ * reads a foreign guideline quoted as governing and stops trusting the report.
+ *
+ * Names of reference-library bodies must therefore never appear in the
+ * narrative sections. They belong in [11] REFERENCES and nowhere else.
+ */
+export const JURISDICTION_RULE =
+  "\n\nHOW TO USE THIS CHECKLIST - READ CAREFULLY\n" +
+  "1. This checklist defines SCOPE ONLY: what a competent analysis covers. It supplies\n" +
+  "   no values, thresholds, percentages or formulas.\n" +
+  "2. The bracketed source explains why an item is in scope. That body has NO authority\n" +
+  "   at this project's location unless it happens to be the local authority.\n" +
+  "3. Establish the standards and authorities that ACTUALLY GOVERN in this country and\n" +
+  "   city, and work to those.\n" +
+  "4. NEVER name a checklist source inside findings, interpretation or conclusions.\n" +
+  "   Do not write phrases such as '(Delhi Urban Art Commission)', 'per ARCON' or\n" +
+  "   'to satisfy Ottawa criteria' in the body of the analysis. Cited sources belong\n" +
+  "   in the references section, which is assembled separately.\n" +
+  "5. If you use a threshold that is NOT from this jurisdiction because no local figure\n" +
+  "   could be established, you must (a) label it explicitly as an unverified external\n" +
+  "   benchmark, (b) state that the governing local requirement was not established, and\n" +
+  "   (c) NOT attribute it inline. Example of correct wording: 'Indicative benchmark 80%\n" +
+  "   shade coverage - external reference, not verified against local requirements.'\n" +
+  "6. Where an item does not apply here, say so briefly rather than omitting it.\n";
+
 /** Renders a checklist into a compact prompt block (~300-600 tokens). */
 export function checklistPrompt(toolCode) {
   const cl = CHECKLISTS[toolCode];
   if (!cl) return "";
-  const items = cl.items.map((i) => `- ${i.c}  [expected by: ${i.src}]`).join("\n");
+  const items = cl.items.map((i) => `- ${i.c}  [why in scope: ${i.src}]`).join("\n");
   const rules = cl.rules.map((r) => `- ${r}`).join("\n");
   return (
     "\n\n--- METHODOLOGY COVERAGE CHECKLIST ---\n" +
     cl.intro + "\n\n" + items +
     "\n\nRULES:\n" + rules +
-    "\n\nIMPORTANT: this checklist defines SCOPE only. It tells you what a competent analysis covers - " +
-    "it does NOT supply values, thresholds or formulas, and the sources named are not necessarily the ones " +
-    "that govern this location. Establish the standards, figures and authorities that actually apply where " +
-    "this project is, and cite those. Where an item does not apply here, say so briefly rather than omitting it.\n"
+    JURISDICTION_RULE
   );
 }

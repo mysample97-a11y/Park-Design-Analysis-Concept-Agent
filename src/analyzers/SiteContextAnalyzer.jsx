@@ -2,12 +2,14 @@ import React, { useState } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, fileToBase64Raw, extractJSON } from "../utils/helpers";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 
 const BTN_DARK = { backgroundColor: "#1C2333", color: "#FFFFFF" };
 const BTN_GOLD = { backgroundColor: "#C9A46A", color: "#1C2333" };
@@ -57,6 +59,10 @@ const SITE_PROMPT =
 export default function SiteContextAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [imageNotes, setImageNotes] = useState("");
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("SCX"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("SCX", u));
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -90,7 +96,8 @@ export default function SiteContextAnalyzer() {
         blocks.push({ type: "image", source: { type: "base64", media_type: f.type || "image/png", data: b64 } });
       }
       blocks.push({ type: "text", text: "These are site/GIS/map images for a park design project. Describe what surrounds the site on each edge - adjacent land uses, roads, buildings, transit, open space. Note anything relevant to arrival, access or noise. Write plain factual observations, no speculation." });
-      const text = await callAI({ provider, apiKey, maxTokens: 2500, content: blocks });
+      const text = await callAI({
+        onUsage: noteUsage, provider, apiKey, maxTokens: 2500, content: blocks });
       if (!text) throw new Error("The AI returned no description for these images.");
       setImageNotes((prev) => (prev ? prev + "\n\n" : "") + text);
     } catch (e) {
@@ -109,6 +116,7 @@ export default function SiteContextAnalyzer() {
     setContextLoading(true); setContextError("");
     try {
       const resText = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 4000, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: SITE_PROMPT + checklistPrompt("SCX") +
@@ -187,6 +195,7 @@ export default function SiteContextAnalyzer() {
       const prompt = `You are a landscape architecture assistant reviewing site context, crowd capacity, and accessibility compliance for a park redesign project, using only the data given - no invented figures. Provide: (1) 1-2 sentences on how adjacent land uses should shape circulation/entry design, (2) any zone whose capacity range looks like it could create crowding or underuse, (3) any path/ramp that failed or needs review, (4) explicitly list the minimum required parameters that should be fed forward as constraints into the Concept Generator step. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority action. Respond with ONLY valid JSON, no markdown fences: {"findings": [""], "forward_constraints": [""], "conclusion": ""}\n\nDATA:\n${JSON.stringify(summary, null, 2)}`;
 
       const resText = await callAI({
+        onUsage: noteUsage,
         provider,
         apiKey: apiKey,
         maxTokens: 4000,
@@ -333,6 +342,7 @@ export default function SiteContextAnalyzer() {
     try {
       const adj = (ctxData?.adjacencies || []).map((a) => `${a.direction}: ${a.land_use || "unknown"}`).join("; ");
       const resText = await callAI({
+        onUsage: noteUsage,
         // No `model` - this context exposes { provider, apiKey, meta } only.
         provider, apiKey, maxTokens: 1200,
         content:
@@ -390,6 +400,14 @@ export default function SiteContextAnalyzer() {
 
   const STATUS_ICON = { pass: <CheckCircle2 size={14} className="text-[#3D7A5C]" />, review: <AlertTriangle size={14} className="text-[#B8863B]" />, pending: <XCircle size={14} className="text-[#8A8474]" /> };
 
+  // Pre-flight estimate is not yet wired for this tool.
+  // Passing null is deliberate: the meter then shows "-" and says the
+  // estimate is unavailable. A fabricated number here - which an earlier
+  // revision produced by misusing `arguments` inside an arrow IIFE - is
+  // worse than no number, because it looks authoritative and is not.
+  // Actual usage is still recorded exactly after every call.
+  const toolEstimate = null;
+
   return (
     <div className="min-h-screen bg-[#F7F5F1] text-[#1C2333] font-sans">
       <ToolIntro toolCode="SCX" />
@@ -421,6 +439,10 @@ export default function SiteContextAnalyzer() {
               </div>
             )}
             <p className="text-[10px] text-[#8A8474]">Up to 4 images. Image upload may not work inside the Claude mobile app (platform restriction) - try your phone's regular browser, or use the text fields above.</p>
+            <div className="mb-3">
+              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+                onReset={() => setTokenUsage(resetUsage("SCX"))} />
+            </div>
             <button onClick={analyzeSiteContext} disabled={contextLoading} style={BTN_GOLD} className="w-full text-base font-bold px-4 py-3 rounded-md flex items-center justify-center gap-2 disabled:opacity-40 shadow-md">
               <Search size={18} /> {contextLoading ? "Researching site context..." : "Analyze Site Context"}
             </button>

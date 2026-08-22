@@ -33,8 +33,101 @@ export function parseClaudeResponse(data) {
   return "";
 }
 
+import { readProviderUsage, estimateTokens, recordRequest, readRateLimitHeaders, saveLiveLimits } from "./tokenMeter";
+
+/**
+ * Reports token usage to the caller without changing any return contract.
+ * If the provider reported nothing, an estimate is supplied and clearly
+ * flagged, so the UI never presents a guess as a measurement.
+ */
+function emitUsage(onUsage, data, { content, systemInstruction, text }) {
+  // Request counting is GLOBAL and unconditional - rate limits are enforced per
+  // key, not per tool, and they apply whether or not a tool passes onUsage.
+  try { recordRequest(); } catch { /* accounting must never break a run */ }
+  if (typeof onUsage !== "function") return;
+  try {
+    const reported = readProviderUsage(data && (data.usage || data.usageMetadata));
+    if (reported) {
+      onUsage({ ...reported, estimated: false });
+    } else {
+      onUsage({
+        input: estimateTokens(systemInstruction) + estimateTokens(content),
+        output: estimateTokens(text),
+        estimated: true,
+      });
+    }
+  } catch {
+    /* accounting must never break a run */
+  }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * TRANSIENT-FAILURE RETRY  (F18)
+ *
+ * 529 is Anthropic signalling server-side overload. It is NOT a rate limit and
+ * NOT a quota problem - it means the API is temporarily unable to serve anyone,
+ * regardless of your account. Previously this surfaced immediately as "the model
+ * is currently experiencing high demand", which reads to a user like their key
+ * or their input is at fault when neither is.
+ *
+ * Almost all of these clear within seconds, so a short backoff absorbs them
+ * invisibly. Deliberately NOT retried:
+ *   429  a real rate limit - retrying makes it worse and burns request quota,
+ *        which on a 15 RPM free tier is the scarce resource
+ *   4xx  the request itself is wrong; repeating it cannot help
+ *
+ * Jitter is applied so that concurrent calls do not resynchronise and arrive
+ * together on the retry, which is how a thundering herd forms.
+ * ------------------------------------------------------------------------- */
+const RETRY_STATUSES = [529, 500, 502, 503, 504];
+const MAX_ATTEMPTS = 3;
+
+function backoffDelay(attempt) {
+  const base = 1000 * Math.pow(2, attempt);      // 1s, 2s, 4s
+  return Math.round(base + Math.random() * 400); // jitter
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Wraps a fetch-returning thunk with backoff on transient server failures.
+ * The thunk must return the Response; it is re-invoked from scratch each
+ * attempt so no body stream is reused.
+ */
+export async function withRetry(makeRequest, onAttempt) {
+  let last = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const response = await makeRequest();
+    if (response.ok || !RETRY_STATUSES.includes(response.status)) return response;
+    last = response;
+    if (attempt < MAX_ATTEMPTS - 1) {
+      const wait = backoffDelay(attempt);
+      if (typeof onAttempt === "function") {
+        onAttempt({ attempt: attempt + 1, of: MAX_ATTEMPTS, status: response.status, waitMs: wait });
+      }
+      await sleep(wait);
+    }
+  }
+  return last;
+}
+
+/** Human-readable explanation for a transient status. */
+export function transientMessage(status) {
+  if (status === 529) {
+    return "The AI provider is temporarily overloaded (HTTP 529). This is a problem at their end, " +
+           "not with your API key, your quota or your input. It was retried automatically and still " +
+           "did not clear - waiting a minute and trying again usually works.";
+  }
+  if (status >= 500) {
+    return `The AI provider returned a server error (HTTP ${status}) and did not recover after retries. ` +
+           "This is not caused by your key or your input.";
+  }
+  return "";
+}
+
 // ---------- Gemini ----------
-export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources }) {
+export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Gemini API key is missing. Please enter your API key in Settings.");
 
@@ -83,12 +176,20 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
   })();
   if (groundingOn) payload.tools = [{ google_search: {} }];
 
-  async function send(body) {
-    const r = await fetch(url, {
+  // A Response body can only be read ONCE. send() therefore performs the fetch
+  // AND parses, returning both; withRetry must operate on the raw fetch so that
+  // each attempt gets a fresh, unread body. Reading json() after a retried
+  // response would throw "body stream already read".
+  async function sendRaw(body) {
+    return await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": cleanKey },
       body: JSON.stringify(body),
     });
+  }
+
+  async function send(body) {
+    const r = await withRetry(() => sendRaw(body), onRetry);
     return { r, data: await r.json().catch(() => ({})) };
   }
 
@@ -131,11 +232,12 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
 
   const text = parseGeminiResponse(data);
   if (!text) throw new Error("Gemini returned an empty response. Try again.");
+  emitUsage(onUsage, data, { content, systemInstruction, text });
   return text;
 }
 
 // ---------- Claude ----------
-export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources }) {
+export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Claude API key is missing. Please enter your API key in Settings.");
 
@@ -173,7 +275,7 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   if (systemInstruction) payload.system = systemInstruction;
   if (useWebSearch) payload.tools = [{ type: "web_search_20250305", name: "web_search" }];
 
-  const response = await fetch(url, {
+  const response = await withRetry(() => fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -182,10 +284,17 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify(payload),
-  });
+  }), onRetry);
+
+  // F8: read live quota off the response headers before touching the body.
+  // Returns null when CORS has not exposed them, in which case the meter
+  // silently falls back to declared limits rather than showing blanks.
+  try { saveLiveLimits("claude", readRateLimitHeaders(response)); } catch { /* non-fatal */ }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const transient = transientMessage(response.status);
+    if (transient) throw new Error(transient);
     throw new Error(data?.error?.message || `Claude API Error (${response.status})`);
   }
   if (useWebSearch && typeof onSources === "function") {
@@ -199,6 +308,7 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   }
   const text = parseClaudeResponse(data);
   if (!text) throw new Error("The AI returned no analyzable text (it may have only performed search steps). Try again.");
+  emitUsage(onUsage, data, { content, systemInstruction, text });
   return text;
 }
 
@@ -229,11 +339,13 @@ export async function callAI(opts = {}) {
   const useWebSearch = opts.useWebSearch || false;
   const pdfBase64 = opts.pdfBase64 || null;
   const onSources = opts.onSources || null;
+  const onUsage = opts.onUsage || null;
+  const onRetry = opts.onRetry || null;
 
   if (provider.includes("claude") || provider.includes("anthropic")) {
-    return await callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources });
+    return await callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry });
   }
-  return await callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources });
+  return await callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry });
 }
 
 export default callAI;

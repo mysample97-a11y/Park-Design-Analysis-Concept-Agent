@@ -5,10 +5,12 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML, sunPathCompassSVG } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML, sunPathCompassSVG, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -90,6 +92,10 @@ function buildDayData(month, day, lat, lon, utcOffset) {
 export default function SolarAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("SOL"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("SOL", u));
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -111,6 +117,7 @@ export default function SolarAnalyzer() {
     setSiteLoading(true); setSiteError(""); setSiteInfo(null);
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 900, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `Find the approximate latitude, longitude, and UTC timezone offset (as a number, e.g. 4 for UTC+4) for this location: "${location}". Respond with ONLY valid JSON, no markdown fences: {"lat": 0, "lon": 0, "utc_offset": 0, "resolved_name": "", "source": "how you determined this"}`,
@@ -142,6 +149,7 @@ export default function SolarAnalyzer() {
     setAutoLoading(true);
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 1600, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
@@ -254,6 +262,7 @@ export default function SolarAnalyzer() {
     };
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500, useWebSearch: false,
         content: "You are a landscape architect interpreting computed solar geometry for a site. Use ONLY the computed data supplied - never invent temperature, UV or radiation figures. " +
           "Assess the site against the published shade coverage targets provided, and state where the site will fail them. " +
@@ -273,6 +282,13 @@ export default function SolarAnalyzer() {
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
       setInsight(parsedInsight);
+      // Field-completeness guard. When the output budget runs short the model
+      // drops the TAIL fields of a schema; the report then prints
+      // "(not generated)" into those sections with nothing on screen to say
+      // why. Keys are taken from THIS tool's own prompt so the check cannot
+      // drift away from the contract it is checking.
+      const gaps = missingFields(parsedInsight, ["shade_strategy", "zone_recommendations", "conclusion"]);
+      if (gaps.length) setInsightError(missingFieldsNote(gaps));
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
     finally { setInsightLoading(false); }
   }
@@ -389,6 +405,14 @@ export default function SolarAnalyzer() {
     }));
   }
 
+  // Pre-flight estimate is not yet wired for this tool.
+  // Passing null is deliberate: the meter then shows "-" and says the
+  // estimate is unavailable. A fabricated number here - which an earlier
+  // revision produced by misusing `arguments` inside an arrow IIFE - is
+  // worse than no number, because it looks authoritative and is not.
+  // Actual usage is still recorded exactly after every call.
+  const toolEstimate = null;
+
   return (
     <div className="space-y-6">
       <ToolIntro toolCode="SOL" />
@@ -465,6 +489,10 @@ export default function SolarAnalyzer() {
             <div className="p-4">
               <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
+                <div className="mb-3">
+                  <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+                    onReset={() => setTokenUsage(resetUsage("SOL"))} />
+                </div>
                 <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
                   <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
                 </button>

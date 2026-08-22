@@ -6,6 +6,8 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -73,6 +75,10 @@ export default function SurveyAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
 
   const [raw, setRaw] = useState("");
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("SUR"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("SUR", u));
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -138,6 +144,7 @@ export default function SurveyAnalyzer() {
     try {
       const base64 = await fileToBase64Raw(file);
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 3500,
         content: [
           { type: "image", source: { type: "base64", media_type: file.type || "image/png", data: base64 } },
@@ -165,6 +172,7 @@ export default function SurveyAnalyzer() {
     };
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 3500,
         content: "You are a community engagement analyst. Analyse the survey responses below and produce a genuinely useful synthesis - not a restatement of the data. " +
           "Return ONLY valid JSON, no markdown fences: {" +
@@ -271,6 +279,14 @@ export default function SurveyAnalyzer() {
     }));
   }
 
+  // Pre-flight estimate is not yet wired for this tool.
+  // Passing null is deliberate: the meter then shows "-" and says the
+  // estimate is unavailable. A fabricated number here - which an earlier
+  // revision produced by misusing `arguments` inside an arrow IIFE - is
+  // worse than no number, because it looks authoritative and is not.
+  // Actual usage is still recorded exactly after every call.
+  const toolEstimate = null;
+
   return (
     <div className="space-y-6">
       <ToolIntro toolCode="SUR" />
@@ -315,6 +331,10 @@ export default function SurveyAnalyzer() {
               <span className="font-semibold">{parsed.responseCount}</span> response{parsed.responseCount !== 1 ? "s" : ""} parsed
               {parsed.responseCount < 20 && <span className="text-brand-warning"> - small sample, treat patterns as indicative</span>}
             </p>
+            <div className="mb-3">
+              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+                onReset={() => setTokenUsage(resetUsage("SUR"))} />
+            </div>
             <button onClick={generateAnalysis} disabled={analysisLoading || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {analysisLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>

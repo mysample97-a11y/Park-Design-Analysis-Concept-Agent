@@ -299,6 +299,74 @@ export const OVERFLOW_PROMPT =
   "If nothing material remains, respond with exactly: Nothing material remains. " +
   "Do not manufacture filler. Do not repeat content already in the report. Be concise.";
 
+
+/* ---------------------------------------------------------------------------
+ * NARRATIVE SANITISER
+ *
+ * Last line of defence for the jurisdiction problem. The prompt now forbids
+ * naming checklist sources in the body, but a prompt is guidance, not a
+ * guarantee - the model can still slip. This strips inline attributions to
+ * bodies that do not govern at the project location out of the narrative and
+ * routes them to the references section instead.
+ *
+ * METHOD sources (NOAA, ASHRAE, RICS NRM1, Lawson) are deliberately NOT
+ * stripped. They describe how a number was computed, so naming them inline is
+ * correct and is the basis of the determinism claim.
+ * ------------------------------------------------------------------------- */
+const NON_GOVERNING_BODIES = [
+  "Delhi Urban Art Commission", "Delhi UAC", "DUAC", "Delhi",
+  "Architects Registration Council of Nigeria", "ARCON",
+  "City of Ottawa", "Ottawa",
+];
+
+/** Strips inline attributions to non-governing bodies from a narrative string. */
+export function sanitiseNarrative(text, collected) {
+  if (!text) return text;
+  let out = String(text);
+  NON_GOVERNING_BODIES.forEach((body) => {
+    const esc = body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // "(Delhi Urban Art Commission)" / "[per ARCON]" -> removed, noted
+    const paren = new RegExp("\\s*[\\(\\[](?:per |as per |source: |ref: )?" + esc + "[^\\)\\]]*[\\)\\]]", "gi");
+    if (paren.test(out)) { if (collected) collected.add(body); out = out.replace(paren, ""); }
+    // "per ARCON" / "to satisfy Delhi UAC guidelines" -> neutral wording
+    const inline = new RegExp("(?:,\\s*)?\\b(?:per|as per|to satisfy|following|in accordance with|according to)\\s+" + esc + "\\b[^,.;]*", "gi");
+    if (inline.test(out)) { if (collected) collected.add(body); out = out.replace(inline, ""); }
+    // bare mention left over -> flag as unverified external benchmark
+    const bare = new RegExp("\\b" + esc + "\\b", "gi");
+    if (bare.test(out)) {
+      if (collected) collected.add(body);
+      out = out.replace(bare, "an external reference (not verified against local requirements)");
+    }
+  });
+  return out.replace(/\s{2,}/g, " ").replace(/\s+([,.;:])/g, "$1").trim();
+}
+
+/** Builds the source-provenance block for the references section. */
+export function provenanceLines(provenance) {
+  const L = [];
+  const mode = (provenance && provenance.mode) || "training";
+  L.push("  SOURCE PROVENANCE");
+  if (mode === "web") {
+    L.push("    Research mode: LIVE WEB RESEARCH. The retrieved sources are listed above with");
+    L.push("    their URLs as returned at the time of the run.");
+    L.push("    Credibility note: retrieved sources have NOT been independently assessed for");
+    L.push("    authority, currency or accuracy. A retrieved page is evidence that a claim was");
+    L.push("    published, not that it is correct or that it governs at this location. Verify");
+    L.push("    any figure that will carry a design decision.");
+    if (provenance && provenance.searchedAt) L.push(`    Retrieved: ${provenance.searchedAt}`);
+  } else {
+    L.push("    Research mode: MODEL TRAINING KNOWLEDGE ONLY. No live web research was performed");
+    L.push("    for this run - either no research step was requested, or the API tier in use does");
+    L.push("    not provide web access.");
+    L.push("    Consequence: statements not derived from the computed values or from the standing");
+    L.push("    references above come from the model's training data. They carry no retrievable");
+    L.push("    citation, may be out of date, and must be verified before use. Figures that");
+    L.push("    govern a design decision should be confirmed against the local authority.");
+  }
+  L.push("");
+  return L;
+}
+
 /**
  * Assemble the 11-section report.
  * Static sections come from TOOL_SPECS; everything else must be supplied by the caller
@@ -316,11 +384,13 @@ export function buildStructuredReport({
   runLimitations = [],   // run-specific, added to standing ones
   extraRefs = [],        // [{t,o,y,u}] any AI-cited sources
   overflow = "",         // model-generated overflow appendix
+  provenance = null,     // {mode:"web"|"training", searchedAt}
 }) {
   const spec = TOOL_SPECS[toolCode];
   if (!spec) throw new Error(`Unknown tool code: ${toolCode}`);
   const date = new Date().toISOString().slice(0, 10);
   const L = [];
+  const stripped = new Set();   // non-governing bodies removed from narrative
 
   L.push(spec.name.toUpperCase());
   L.push("");
@@ -372,10 +442,10 @@ export function buildStructuredReport({
       L.push(`  6.${fi + 1}  ${f.title.toUpperCase()}`);
       if (f.note) L.push(`       ${f.note}`);
       if (f.text) {
-        String(f.text).split("\n").forEach((ln) => L.push(`       ${ln}`));
+        sanitiseNarrative(String(f.text), stripped).split("\n").forEach((ln) => L.push(`       ${ln}`));
       }
       if (f.items && f.items.length) {
-        f.items.forEach((it) => L.push(`       - ${it}`));
+        f.items.forEach((it) => L.push(`       - ${sanitiseNarrative(String(it), stripped)}`));
       }
       if (f.headers && f.rows) {
         L.push("       " + f.headers.join(" | "));
@@ -391,7 +461,7 @@ export function buildStructuredReport({
   L.push("");
 
   L.push("[8] INTERPRETATION");
-  L.push(`  ${interpretation || "(not generated)"}`);
+  L.push(`  ${interpretation ? sanitiseNarrative(interpretation, stripped) : "(not generated)"}`);
   L.push("");
 
   L.push("[9] ASSUMPTIONS AND LIMITATIONS");
@@ -404,7 +474,7 @@ export function buildStructuredReport({
   L.push("");
 
   L.push("[10] CONCLUSIONS AND RECOMMENDATIONS");
-  if (conclusions.length) conclusions.forEach((c) => L.push(`  - ${c}`));
+  if (conclusions.length) conclusions.forEach((c) => L.push(`  - ${sanitiseNarrative(String(c), stripped)}`));
   else L.push("  (not generated)");
   L.push("");
 
@@ -418,6 +488,14 @@ export function buildStructuredReport({
   L.push("");
   L.push(`  Professional convention: ${spec.convention}`);
   L.push("");
+  provenanceLines(provenance).forEach((ln) => L.push(ln));
+  if (stripped.size) {
+    L.push("  EXTERNAL REFERENCES REMOVED FROM THE NARRATIVE");
+    L.push("    The following were cited inside the analysis text and have been moved here.");
+    L.push("    They are methodological references only and do not govern at this location:");
+    Array.from(stripped).forEach((b) => L.push(`      - ${b}`));
+    L.push("");
+  }
 
   L.push("APPENDIX A - ADDITIONAL ANALYTICAL OBSERVATIONS");
   L.push("  Model-generated commentary that did not fit the structured sections above.");

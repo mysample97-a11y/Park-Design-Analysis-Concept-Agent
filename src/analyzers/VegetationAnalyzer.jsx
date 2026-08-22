@@ -4,10 +4,12 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 const MAX_IMAGES = 5;
@@ -16,6 +18,10 @@ const MAX_IMAGES = 5;
 export default function VegetationAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("VEG"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("VEG", u));
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -32,6 +38,7 @@ export default function VegetationAnalyzer() {
     setResearching(true); setResearchError("");
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 3000, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `For the location "${location}", give a reference planting palette of 10-14 species suitable for public landscape there, prioritising native and climate-adapted species. Respond with ONLY a JSON array, no markdown fences: [{"id":"short_id","name":"Common name (Botanical name)","type":"Canopy Tree|Palm|Shrub|Groundcover|Accent","water":"Low|Medium|High","shade":"Full Sun|Part Shade|Shade","origin":"Native|Adaptive|Introduced - note"}]. Use real species that genuinely grow in that climate. Do not invent species.`,
@@ -72,6 +79,7 @@ export default function VegetationAnalyzer() {
     setStructuring(true); setStructureError("");
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 1000,
         content: "Extract a structured inventory of EXISTING vegetation from these landscape architect site-visit notes/photo descriptions - only plants that are CURRENTLY on site right now, not suggestions for the future. For each distinct plant/tree mentioned, output: name, estimated_count (number or 'several'/'unclear'), condition (Healthy/Fair/Poor/Unclear), recommendation (Retain/Remove/Relocate/Assess further), notes (brief). If no existing vegetation is described (e.g. the text is only a general site description with no plants mentioned), return an empty array. Respond with ONLY a valid JSON array, no markdown, no prose.\n\nNOTES:\n" + (siteContext + (photoNotes ? "\n\nPHOTO OBSERVATIONS (AI-generated from uploaded site photos):\n" + photoNotes : "")),
       });
@@ -102,6 +110,7 @@ export default function VegetationAnalyzer() {
       }
       contentBlocks.push({ type: "text", text: "These are site-visit photos from a park redesign project. Describe what vegetation/trees/plants are visible across all photos - species if identifiable, apparent condition, approximate count per photo. Write this as plain field notes (a few sentences per photo), the way a landscape architect would jot down observations. Do not describe anything other than vegetation." });
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 3000,
         content: contentBlocks,
       });
@@ -127,6 +136,7 @@ export default function VegetationAnalyzer() {
     };
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 1500,
         content: "You are a landscape architecture assistant giving planting and site-condition guidance for a park design at the stated location. The 'general_reference_palette' is a reference list of species appropriate to that region - it is NOT specific to this site yet; your job is to reason about which of these actually fit THIS site given the terrain/soil reference and any user-provided site context or existing inventory. Do not invent species outside the reference list, and do not invent terrain/soil facts beyond what's given. Provide: " +
           "(1) 'terrain_soil_note': 1-2 sentences on what the terrain/soil data means for planting choices and what to verify once real data arrives, " +
@@ -141,6 +151,13 @@ export default function VegetationAnalyzer() {
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
       setInsight(parsedInsight);
+      // Field-completeness guard. When the output budget runs short the model
+      // drops the TAIL fields of a schema; the report then prints
+      // "(not generated)" into those sections with nothing on screen to say
+      // why. Keys are taken from THIS tool's own prompt so the check cannot
+      // drift away from the contract it is checking.
+      const gaps = missingFields(parsedInsight, ["terrain_soil_note", "inventory_guidance", "suggested_species", "existing_value", "existing_vegetation", "conclusion"]);
+      if (gaps.length) setInsightError(missingFieldsNote(gaps));
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -213,6 +230,14 @@ export default function VegetationAnalyzer() {
       setPdfError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again.");
     }));
   }
+
+  // Pre-flight estimate is not yet wired for this tool.
+  // Passing null is deliberate: the meter then shows "-" and says the
+  // estimate is unavailable. A fabricated number here - which an earlier
+  // revision produced by misusing `arguments` inside an arrow IIFE - is
+  // worse than no number, because it looks authoritative and is not.
+  // Actual usage is still recorded exactly after every call.
+  const toolEstimate = null;
 
   return (
     <div className="space-y-6">
@@ -298,6 +323,10 @@ export default function VegetationAnalyzer() {
             <div>
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">Step 2 — AI Insight & Recommendation</h2>
               <p className="text-[10px] text-brand-text/60">Uses your site context + terrain/soil data + reference palette to suggest what actually fits this site.</p>
+            </div>
+            <div className="mb-3">
+              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+                onReset={() => setTokenUsage(resetUsage("VEG"))} />
             </div>
             <button onClick={generateInsight} disabled={insightLoading || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}

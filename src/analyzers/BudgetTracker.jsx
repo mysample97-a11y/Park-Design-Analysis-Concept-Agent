@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -11,7 +13,7 @@ import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, formatNu
 // this suite can be fed straight in without the user converting it first.
 import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, barChartSVG, tableHTML, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
@@ -66,6 +68,11 @@ export default function BudgetTracker() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
+  // Token accounting. Read once on mount from localStorage so the figure
+  // survives a reload - the whole point is to see spend accumulate across a
+  // session, including after swapping in a different key.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("BDG"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("BDG", u));
 
   function addFacility() { setFacilities([...facilities, { id: uid(), name: "", area: "", rate: "" }]); }
   function updateFacility(id, patch) { setFacilities(facilities.map((f) => (f.id === id ? { ...f, ...patch } : f))); }
@@ -114,6 +121,7 @@ export default function BudgetTracker() {
       // reply cannot overflow.
       const scope = detectedConcepts.length > 1 ? detectedConcepts[0] : { label: "", text: pasteText };
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500,
         content:
           "Extract EVERY built facility or zone from this park programme. Do not summarise, do not merge similar " +
@@ -353,6 +361,7 @@ export default function BudgetTracker() {
         facility_count: (c.facilities || []).length,
       }));
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 3000,
         content:
           "These park concepts have ALREADY been costed - do not recost them. Compare on VALUE FOR MONEY, not " +
@@ -407,6 +416,10 @@ export default function BudgetTracker() {
     return await callAI({
       // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
       // passing `model` threw "model is not defined" the moment a file was uploaded.
+      // Counted deliberately: this is image input at 3000 max tokens and is the
+      // most expensive call the tool makes. Leaving it out of the meter would
+      // understate spend precisely where a user is most likely to run dry.
+      onUsage: noteUsage,
       provider, apiKey, maxTokens: 3000,
       content: [
         ...blocks,
@@ -437,6 +450,7 @@ export default function BudgetTracker() {
         const batch = named.slice(start2, start2 + CHUNK);
         setResearchError(`Researching rates ${start2 + 1}-${Math.min(start2 + CHUNK, named.length)} of ${named.length}...`);
         const text = await callAI({
+          onUsage: noteUsage,
           provider, apiKey, maxTokens: 2200, useWebSearch: true,
           onSources: (g) => {
             (g.sources || []).forEach((x) => sourcesSeen.push(x));
@@ -587,6 +601,25 @@ export default function BudgetTracker() {
     setDetectError("Facility schedule replaced with " + c.name + ". Sections 6.1 and 6.2 now describe that concept.");
   }
 
+  // Pre-flight estimate for the insight run. Deliberately built from the SAME
+  // inputs the call will send - facility count, concept count, cap - so the
+  // figure tracks reality rather than being a fixed guess. Recomputed on every
+  // render, which is cheap: it is string length arithmetic, no tokeniser.
+  const insightEstimate = (() => {
+    try {
+      const facilityBulk = JSON.stringify(facilities || []);
+      const conceptBulk = comparison?.concepts ? JSON.stringify(comparison.concepts) : "";
+      return estimateRun({
+        systemText: "cost planning system instruction and methodology checklist",
+        userText: facilityBulk + conceptBulk + String(pasteText || "").slice(0, 4000),
+        maxTokens: 2000,
+        calls: 1,
+      });
+    } catch {
+      return null;
+    }
+  })();
+
   async function generateInsight() {
     // STEP 3 - INSIGHT. One AI call. It does NOT re-run the comparison; that is
     // a separate, explicit button. Chaining them here meant a single press could
@@ -614,6 +647,7 @@ export default function BudgetTracker() {
       const headroomPct = cap && headroom !== null ? Math.round((headroom / cap) * 100) : null;
 
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500,
         content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: " +
           "(1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high or low, " +
@@ -1148,6 +1182,14 @@ export default function BudgetTracker() {
       <div className="card p-4">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
           <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h3>
+          <div className="mb-3">
+            <TokenMeter
+              usage={tokenUsage}
+              estimate={insightEstimate}
+              provider={provider}
+              onReset={() => setTokenUsage(resetUsage("BDG"))}
+            />
+          </div>
           <button onClick={generateInsight} disabled={insightLoading || comparing || !apiKey}
             className="btn-dark disabled:opacity-60 disabled:cursor-not-allowed">
             {insightLoading || comparing

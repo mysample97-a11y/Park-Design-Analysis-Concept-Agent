@@ -4,10 +4,12 @@ import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, windRoseSVG } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, windRoseSVG, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
 
 
@@ -16,6 +18,10 @@ const RISK_COLOR = { Low: "#3D7A5C", Medium: "#B8863B", High: "#B84C3D" };
 export default function WindAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("WND"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("WND", u));
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -31,6 +37,7 @@ export default function WindAnalyzer() {
     setResearching(true); setResearchError("");
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 1400, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `For the location "${location}", give the prevailing seasonal wind characteristics. Respond with ONLY a JSON array of 4 season objects, no markdown fences: [{"id":"winter","label":"Winter (months)","prevailing":"compass direction","speedRange":"x-y km/h","character":"one sentence","dustRisk":"Low|Medium|High"}]. Use the four seasons appropriate to that location's climate. Base this on published climate references; do not invent precise wind-rose percentages.`,
@@ -139,6 +146,7 @@ export default function WindAnalyzer() {
     };
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500,
         content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Also return: 'governing_criteria' (one sentence naming the comfort criteria actually applied and whether the project location publishes its own), 'extreme_events' (array of {event, likelihood, design_response} for storm/shamal/dust events documented for this region - empty array if none are documented), and 'contextual_effects' (array of {factor, applies (boolean), implication} covering effects such as downwash from adjacent tall buildings, channelling between blocks, and corner acceleration). Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"governing_criteria\": \"\", \"extreme_events\": [{\"event\": \"\", \"likelihood\": \"\", \"design_response\": \"\"}], \"contextual_effects\": [{\"factor\": \"\", \"applies\": true, \"implication\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("WND") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2),
       });
@@ -148,6 +156,13 @@ export default function WindAnalyzer() {
       if (!parsedInsight) throw new Error("The reply could not be read as structured data, even after recovery. "
         + "This is usually a truncated response - shorten the input or run it again.");
       setInsight(parsedInsight);
+      // Field-completeness guard. When the output budget runs short the model
+      // drops the TAIL fields of a schema; the report then prints
+      // "(not generated)" into those sections with nothing on screen to say
+      // why. Keys are taken from THIS tool's own prompt so the check cannot
+      // drift away from the contract it is checking.
+      const gaps = missingFields(parsedInsight, ["zone_recommendations", "governing_criteria", "extreme_events", "contextual_effects", "conclusion"]);
+      if (gaps.length) setInsightError(missingFieldsNote(gaps));
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -248,6 +263,14 @@ export default function WindAnalyzer() {
     }));
   }
 
+  // Pre-flight estimate is not yet wired for this tool.
+  // Passing null is deliberate: the meter then shows "-" and says the
+  // estimate is unavailable. A fabricated number here - which an earlier
+  // revision produced by misusing `arguments` inside an arrow IIFE - is
+  // worse than no number, because it looks authoritative and is not.
+  // Actual usage is still recorded exactly after every call.
+  const toolEstimate = null;
+
   return (
     <div className="space-y-6">
       <ToolIntro toolCode="WND" />
@@ -325,6 +348,10 @@ export default function WindAnalyzer() {
         <div className="p-4">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
+            <div className="mb-3">
+              <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+                onReset={() => setTokenUsage(resetUsage("WND"))} />
+            </div>
             <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>

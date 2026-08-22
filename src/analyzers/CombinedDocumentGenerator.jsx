@@ -3,6 +3,8 @@ import { Sparkles, AlertTriangle, Info, Layers, Copy, CheckCircle2, Upload, File
 import * as XLSX from "xlsx";
 import * as mammoth from "mammoth";
 import { callAI } from "../utils/ai";
+import TokenMeter from "../components/TokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -10,7 +12,7 @@ import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF, fileToBase64Raw, copyToClipboard } from "../utils/helpers";
 import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
 import ExportButtons from "../components/ExportButtons";
-import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML } from "../utils/reportTemplate";
+import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 
 // EXAMPLE CONTENT ONLY - a worked sample from one project, offered behind a 'Load worked example'
 // link so users can see the expected level of detail. Never pre-filled.
@@ -38,6 +40,10 @@ const SECTIONS = [
 export default function CombinedDocumentGenerator() {
   const { provider, apiKey, meta } = useAppContext();
   const [inputs, setInputs] = useState(() => Object.fromEntries(SECTIONS.map((s) => [s.id, s.default])));
+  // Token accounting for this tool. Request limits are global; token
+  // usage is reported per tool so you can see which one is expensive.
+  const [tokenUsage, setTokenUsage] = useState(() => getUsage("CMB"));
+  const noteUsage = (u) => setTokenUsage(recordUsage("CMB", u));
   const [fileLoading, setFileLoading] = useState({});
   const [fileErrors, setFileErrors] = useState({});
   const [pdfNotes, setPdfNotes] = useState({});
@@ -58,6 +64,7 @@ export default function CombinedDocumentGenerator() {
       "in Settings and re-upload. Or upload the .xlsx or .rtf export instead - those carry the " +
       "same content, read instantly, and need no key at all.");
     return await callAI({
+        onUsage: noteUsage,
       // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
       // passing `model` threw "model is not defined" the moment a file was uploaded.
       provider, apiKey, maxTokens: 3000,
@@ -105,6 +112,7 @@ export default function CombinedDocumentGenerator() {
     try {
       const combined = filled.map((sec) => `## ${sec.label}\n${inputs[sec.id]}`).join("\n\n");
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 2000, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
@@ -147,6 +155,7 @@ export default function CombinedDocumentGenerator() {
         : "");
     try {
       const text = await callAI({
+        onUsage: noteUsage,
         provider, apiKey, maxTokens: 6000,
         content:
           "You are compiling a Site Analysis and Opportunities Assessment for a park redesign, from six input sections below. Produce: " +
@@ -279,6 +288,14 @@ export default function CombinedDocumentGenerator() {
     }));
   }
 
+  // Pre-flight estimate is not yet wired for this tool.
+  // Passing null is deliberate: the meter then shows "-" and says the
+  // estimate is unavailable. A fabricated number here - which an earlier
+  // revision produced by misusing `arguments` inside an arrow IIFE - is
+  // worse than no number, because it looks authoritative and is not.
+  // Actual usage is still recorded exactly after every call.
+  const toolEstimate = null;
+
   return (
     <div className="space-y-6">
       <ToolIntro toolCode="CMB" />
@@ -353,6 +370,14 @@ export default function CombinedDocumentGenerator() {
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="mb-3">
+
+            <TokenMeter usage={tokenUsage} estimate={toolEstimate} provider={provider}
+
+              onReset={() => setTokenUsage(resetUsage("CMB"))} />
+
           </div>
 
           <button onClick={generateConsolidated} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>
