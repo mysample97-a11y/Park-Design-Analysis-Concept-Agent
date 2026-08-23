@@ -147,7 +147,7 @@ export default function SolarAnalyzer() {
       const named = zones.filter((z) => z.name.trim());
       const preview = JSON.stringify({ location, zones: named }, null, 2);
       const exact = await countTokensExact({
-        provider, apiKey, model,
+        provider, apiKey, model: undefined,
         systemText: "solar insight system instruction and methodology checklist",
         userText: preview,
       });

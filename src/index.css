@@ -61,169 +61,432 @@ input, textarea, select { color: #1C2333; }
 .landing-root input, .landing-root textarea, .landing-root select { color: inherit; }
 
 /* ---------------------------------------------------------------------------
-   TOOL SHELL - DARK THEME   (F31 rev 4)
+   TOOL SHELL - DARK THEME   (F31 rev 5)
 
-   Scoped to .as2p-tools-theme. The two video landing pages are outside it and
-   are untouched.
+   .as2p-tools-theme now wraps the ENTIRE tool view - header, tab strip,
+   settings and tools. Earlier revisions themed only fragments, which is why the
+   header kept its old colours and the rails overlapped the title.
 
-   WHY REV 3 PRODUCED INVISIBLE TEXT
-   Rev 3 listed specific hex classes (bg-[#FBF1E1] etc). Anything it missed kept
-   its light background, while the text rules still fired - light text on a light
-   panel. Worse, the tools also use arbitrary TEXT colours (text-[#1C2333],
-   text-[#5A5445] ...) which were never overridden at all, so dark text stayed
-   dark on the panels that DID go dark.
+   LAYOUT RULE
+   The themed container is padded left by the rail width, so EVERYTHING inside
+   it - including the header and the title - starts to the right of the rails.
+   The rails can no longer overlap anything, because nothing is allowed into
+   that column.
 
-   Rev 4 uses CATCH-ALLS instead of an enumerated list:
-     [class*="bg-[#"]    every arbitrary background        -> dark surface
-     [class*="text-[#"]  every arbitrary text colour       -> light text
-   Specific semantic panels are then re-tinted AFTER the catch-all, so warnings
-   still look like warnings. Nothing can be missed by omission any more.
+   COLOUR RULE
+   Overrides are CATCH-ALLS, never enumerated lists. Rev 3 listed specific hex
+   classes and everything it missed stayed light while the text went light too.
+   Anything matching bg-[#..., text-[#..., bg-brand-*, or text-brand-* is
+   captured here.
 --------------------------------------------------------------------------- */
 .as2p-tools-theme {
-  --t-bg:        #0A0E14;
-  --t-surface:   #121924;
-  --t-surface-2: #172232;
-  --t-border:    #22304A;
+  --t-bg:        #070C14;
+  --t-surface:   #101823;
+  --t-surface-2: #16202E;
+  --t-border:    #23344C;
   --t-text:      #E8EFF7;
-  --t-muted:     #93A6BC;
+  --t-muted:     #8FA3BA;
   --t-blue:      #4DA3FF;
-  --t-blue-2:    #2E6FD6;
   --t-orange:    #FF8A3D;
 
-  background: var(--t-bg);
+  background: var(--t-bg) !important;
   color: var(--t-text);
   font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
-  min-height: 100vh;
-  padding-bottom: 40px;
 }
 
-/* ---- LAYOUT: rails left, content uses the rest ---- */
+/* ---- LAYOUT ---- */
 .as2p-rail-stack {
   position: fixed;
-  left: 14px;
-  top: 132px;
-  width: 238px;
-  max-height: calc(100vh - 150px);
+  left: 14px;   /* inside the 262px column the shell reserves */
+  top: 16px;
+  width: 234px;
+  max-height: calc(100vh - 32px);
   overflow-y: auto;
   display: flex; flex-direction: column; gap: 12px;
-  z-index: 40;
-  padding-bottom: 8px;
+  z-index: 50;
 }
 .as2p-rail-stack::-webkit-scrollbar { width: 6px; }
-.as2p-rail-stack::-webkit-scrollbar-thumb { background: #22304A; border-radius: 3px; }
+.as2p-rail-stack::-webkit-scrollbar-thumb { background: #23344C; border-radius: 3px; }
 
-/* Content sits right of the rails and runs close to the right edge, so the
-   wasted gutter is reclaimed. Settings uses the SAME width, so the two never
-   disagree and the rails cannot overlap either of them. */
-.as2p-tools-theme .as2p-rail-main,
-.as2p-tools-theme .as2p-wide {
-  margin-left: 266px;
-  margin-right: 24px;
-  max-width: none;
+@media (min-width: 1280px) {
+  /* every child of the themed view is pushed clear of the rail column */
+  .as2p-tools-theme { padding-left: 262px; }
+  .as2p-tools-theme .max-w-6xl { max-width: none !important; margin-right: 24px; }
+  .as2p-tools-theme .as2p-wide,
+  .as2p-tools-theme .as2p-rail-main { margin-left: 0; margin-right: 24px; max-width: none; }
 }
-@media (max-width: 1279px) {
-  .as2p-rail-stack { display: none; }
-  .as2p-tools-theme .as2p-rail-main,
-  .as2p-tools-theme .as2p-wide { margin-left: 12px; margin-right: 12px; }
-}
+@media (max-width: 1279px) { .as2p-rail-stack { display: none; } }
 
-/* ---- CATCH-ALL 1: every arbitrary background becomes a dark surface ---- */
-.as2p-tools-theme [class*="bg-[#"] {
+/* ---- CATCH-ALLS: surfaces then text ---- */
+.as2p-tools-theme [class*="bg-[#"],
+.as2p-tools-theme [class*="bg-brand"] {
   background-color: var(--t-surface-2) !important;
   border-color: var(--t-border) !important;
 }
-/* ---- CATCH-ALL 2: every arbitrary text colour becomes readable ---- */
-.as2p-tools-theme [class*="text-[#"] { color: var(--t-text) !important; }
+.as2p-tools-theme [class*="text-[#"],
+.as2p-tools-theme [class*="text-brand"] { color: var(--t-text) !important; }
+.as2p-tools-theme [class*="text-brand-muted"],
+.as2p-tools-theme [class*="/60"], .as2p-tools-theme [class*="/70"] { color: var(--t-muted) !important; }
+.as2p-tools-theme [class*="text-brand-gold"],
+.as2p-tools-theme [class*="text-brand-warning"] { color: var(--t-orange) !important; }
+.as2p-tools-theme [class*="text-brand-danger"] { color: #FF8A7A !important; }
+.as2p-tools-theme [class*="text-brand-success"] { color: #4DD091 !important; }
+.as2p-tools-theme [class*="border-brand"],
+.as2p-tools-theme [class*="border-["] { border-color: var(--t-border) !important; }
+
+.as2p-tools-theme header,
+.as2p-tools-theme [class*="bg-brand-dark"] { background-color: #0B1220 !important; }
 
 /* ---- core surfaces ---- */
 .as2p-tools-theme .card,
-.as2p-tools-theme .bg-white,
 .as2p-tools-theme [class*="bg-white"] {
   background-color: var(--t-surface) !important;
   border-color: var(--t-border) !important;
   color: var(--t-text) !important;
 }
-.as2p-tools-theme .card-header {
-  background-color: var(--t-surface-2) !important;
-  border-color: var(--t-border) !important;
-  color: var(--t-text) !important;
-}
-
-/* ---- text ---- */
-.as2p-tools-theme, .as2p-tools-theme p, .as2p-tools-theme span,
-.as2p-tools-theme div, .as2p-tools-theme li, .as2p-tools-theme td,
-.as2p-tools-theme th, .as2p-tools-theme label, .as2p-tools-theme strong,
-.as2p-tools-theme h1, .as2p-tools-theme h2, .as2p-tools-theme h3,
+.as2p-tools-theme .card-header { background-color: var(--t-surface-2) !important; }
+.as2p-tools-theme, .as2p-tools-theme p, .as2p-tools-theme span, .as2p-tools-theme div,
+.as2p-tools-theme li, .as2p-tools-theme td, .as2p-tools-theme th, .as2p-tools-theme label,
+.as2p-tools-theme strong, .as2p-tools-theme h1, .as2p-tools-theme h2, .as2p-tools-theme h3,
 .as2p-tools-theme h4, .as2p-tools-theme h5, .as2p-tools-theme h6 { color: var(--t-text); }
-.as2p-tools-theme [class*="text-brand-muted"],
-.as2p-tools-theme [class*="text-brand-text/"],
-.as2p-tools-theme [class*="/60"], .as2p-tools-theme [class*="/70"] { color: var(--t-muted) !important; }
-.as2p-tools-theme [class*="text-brand-dark"],
-.as2p-tools-theme [class*="text-brand-text"] { color: var(--t-text) !important; }
 .as2p-tools-theme a, .as2p-tools-theme .underline { color: var(--t-blue) !important; }
 
-/* ---- semantic panels: re-tinted AFTER the catch-all ---- */
-.as2p-tools-theme .bg-\[\#FBF3E4\],
-.as2p-tools-theme .bg-\[\#FBF1E1\],
+/* ---- semantic panels re-tinted AFTER the catch-all ---- */
+.as2p-tools-theme .bg-\[\#FBF3E4\], .as2p-tools-theme .bg-\[\#FBF1E1\],
 .as2p-tools-theme .bg-\[\#FBF7EE\] {
-  background-color: rgba(255, 138, 61, 0.13) !important;
-  border-color: rgba(255, 138, 61, 0.45) !important;
+  background-color: rgba(255,138,61,.12) !important;
+  border-color: rgba(255,138,61,.5) !important;
+  box-shadow: 0 0 12px rgba(255,138,61,.10);
 }
-.as2p-tools-theme .bg-\[\#FBF3E4\] *,
-.as2p-tools-theme .bg-\[\#FBF1E1\] *,
+.as2p-tools-theme .bg-\[\#FBF3E4\] *, .as2p-tools-theme .bg-\[\#FBF1E1\] *,
 .as2p-tools-theme .bg-\[\#FBF7EE\] * { color: #FFC79A !important; }
 
 .as2p-tools-theme .bg-\[\#FBEAE7\] {
-  background-color: rgba(255, 99, 71, 0.14) !important;
-  border-color: rgba(255, 99, 71, 0.45) !important;
+  background-color: rgba(255,99,71,.13) !important;
+  border-color: rgba(255,99,71,.5) !important;
 }
 .as2p-tools-theme .bg-\[\#FBEAE7\] * { color: #FFB2A2 !important; }
 
 .as2p-tools-theme .bg-\[\#EAF3EC\] {
-  background-color: rgba(77, 208, 145, 0.14) !important;
-  border-color: rgba(77, 208, 145, 0.42) !important;
+  background-color: rgba(77,208,145,.13) !important;
+  border-color: rgba(77,208,145,.45) !important;
 }
 .as2p-tools-theme .bg-\[\#EAF3EC\] * { color: #9BE7C0 !important; }
 
 /* ---- inputs ---- */
-.as2p-tools-theme .input-field, .as2p-tools-theme .input,
-.as2p-tools-theme input, .as2p-tools-theme textarea, .as2p-tools-theme select {
-  background-color: #0E1520 !important;
-  border-color: var(--t-border) !important;
+.as2p-tools-theme .input-field, .as2p-tools-theme .input, .as2p-tools-theme input,
+.as2p-tools-theme textarea, .as2p-tools-theme select {
+  background-color: #0B1220 !important;
+  border: 1px solid var(--t-border) !important;
   color: var(--t-text) !important;
 }
-.as2p-tools-theme input::placeholder,
-.as2p-tools-theme textarea::placeholder { color: #6B7F97 !important; }
+.as2p-tools-theme input:focus, .as2p-tools-theme textarea:focus, .as2p-tools-theme select:focus {
+  border-color: var(--t-blue) !important;
+  box-shadow: 0 0 0 2px rgba(77,163,255,.18) !important;
+  outline: none !important;
+}
+.as2p-tools-theme input::placeholder, .as2p-tools-theme textarea::placeholder { color: #62748C !important; }
 
-/* ---- buttons: blue primary, orange secondary, both with a visible border ---- */
-.as2p-tools-theme .btn-dark,
-.as2p-tools-theme button[class*="btn-dark"] {
-  background: linear-gradient(180deg, #2E6FD6 0%, #1F4FA8 100%) !important;
-  border: 1px solid #4D8BE8 !important;
-  color: #FFFFFF !important;
-  box-shadow: 0 0 0 1px rgba(77,163,255,0.15);
+/* ---- BUTTONS: neon-edged, blue primary / orange secondary ---- */
+.as2p-tools-theme button,
+.as2p-tools-theme .btn-dark, .as2p-tools-theme .btn-gold, .as2p-tools-theme .btn-outline {
+  transition: box-shadow .15s ease, background-color .15s ease, transform .05s ease;
 }
-.as2p-tools-theme .btn-gold,
-.as2p-tools-theme button[class*="btn-gold"] {
-  background: linear-gradient(180deg, #F0812F 0%, #C75F14 100%) !important;
-  border: 1px solid #FF9A52 !important;
+.as2p-tools-theme .btn-dark, .as2p-tools-theme [class*="btn-dark"] {
+  background: linear-gradient(180deg,#1D4E9E 0%,#123A7C 100%) !important;
+  border: 1px solid #4DA3FF !important;
   color: #FFFFFF !important;
+  box-shadow: 0 0 10px rgba(77,163,255,.30), inset 0 0 0 1px rgba(77,163,255,.10);
 }
-.as2p-tools-theme .btn-outline,
-.as2p-tools-theme button[class*="btn-outline"] {
-  background: #131C29 !important;
+.as2p-tools-theme .btn-dark:hover, .as2p-tools-theme [class*="btn-dark"]:hover {
+  box-shadow: 0 0 16px rgba(77,163,255,.55);
+}
+/* pressed / selected: darker and inset, so the state is obvious */
+.as2p-tools-theme .btn-dark:active, .as2p-tools-theme [class*="btn-dark"]:active {
+  background: linear-gradient(180deg,#0F2E63 0%,#0B2350 100%) !important;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.55) !important;
+  transform: translateY(1px);
+}
+.as2p-tools-theme .btn-gold, .as2p-tools-theme [class*="btn-gold"] {
+  background: linear-gradient(180deg,#C2621C 0%,#9C4A10 100%) !important;
+  border: 1px solid #FF8A3D !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 10px rgba(255,138,61,.30);
+}
+.as2p-tools-theme .btn-gold:hover, .as2p-tools-theme [class*="btn-gold"]:hover {
+  box-shadow: 0 0 16px rgba(255,138,61,.55);
+}
+.as2p-tools-theme .btn-gold:active, .as2p-tools-theme [class*="btn-gold"]:active {
+  background: linear-gradient(180deg,#7C3A0C 0%,#5E2C08 100%) !important;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.55) !important;
+  transform: translateY(1px);
+}
+.as2p-tools-theme .btn-outline, .as2p-tools-theme [class*="btn-outline"] {
+  background: #0E1724 !important;
   border: 1px solid #3A5C8A !important;
   color: #DCE7F5 !important;
 }
-.as2p-tools-theme .btn-outline:hover { border-color: var(--t-blue) !important; }
-.as2p-tools-theme button:disabled { opacity: .5 !important; }
+.as2p-tools-theme .btn-outline:hover {
+  border-color: var(--t-blue) !important;
+  box-shadow: 0 0 12px rgba(77,163,255,.30);
+}
+.as2p-tools-theme .btn-outline:active {
+  background: #08111C !important;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.5) !important;
+  transform: translateY(1px);
+}
+.as2p-tools-theme button:disabled { opacity: .45 !important; box-shadow: none !important; }
 
-/* ---- tables, borders, code ---- */
-.as2p-tools-theme table, .as2p-tools-theme pre, .as2p-tools-theme code { color: var(--t-text); }
-.as2p-tools-theme pre { background: #0E1520 !important; }
+/* active tab: blue underline + glow so the selection is unmistakable */
+.as2p-tools-theme [class*="border-b-2"] {
+  border-color: var(--t-blue) !important;
+  color: var(--t-blue) !important;
+  text-shadow: 0 0 10px rgba(77,163,255,.45);
+}
+
+/* ---- misc ---- */
+.as2p-tools-theme pre { background: #0B1220 !important; color: var(--t-text) !important; }
 .as2p-tools-theme th { background-color: var(--t-surface-2) !important; }
-.as2p-tools-theme td, .as2p-tools-theme th, .as2p-tools-theme hr,
-.as2p-tools-theme [class*="border-brand"], .as2p-tools-theme [class*="border-["] {
+.as2p-tools-theme input[type="checkbox"] { accent-color: var(--t-blue); }
+.as2p-tools-theme hr { border-color: var(--t-border) !important; }
+
+
+/* ---------------------------------------------------------------------------
+   NAMED BRAND COLOURS  (rev 5)
+   The catch-alls only cover arbitrary hex classes. These named ones - gold,
+   warm, cream, warning - are what kept the yellow after rev 4.
+--------------------------------------------------------------------------- */
+.as2p-tools-theme [class*="bg-brand-gold"],
+.as2p-tools-theme [class*="bg-brand-warm"],
+.as2p-tools-theme [class*="bg-brand-cream"],
+.as2p-tools-theme [class*="bg-brand-light"] {
+  background-color: var(--t-surface-2) !important;
   border-color: var(--t-border) !important;
 }
-.as2p-tools-theme input[type="checkbox"] { accent-color: var(--t-blue); }
+.as2p-tools-theme [class*="text-brand-gold"] { color: var(--t-orange) !important; }
+.as2p-tools-theme [class*="border-brand-gold"] { border-color: var(--t-orange) !important; }
+.as2p-tools-theme [class*="text-brand-warning"] { color: #FFC79A !important; }
+.as2p-tools-theme [class*="text-brand-danger"]  { color: #FF9B87 !important; }
+.as2p-tools-theme [class*="text-brand-success"] { color: #6FE0A8 !important; }
+.as2p-tools-theme [class*="bg-brand-dark"] { background-color: #0D1420 !important; }
+
+/* ---------------------------------------------------------------------------
+   BUTTONS - neon edge, and a visible PRESSED state
+   Reference look: dark fill, luminous 1px edge, soft outer glow. The pressed
+   state darkens and pulls the glow in, so it is obvious which control is active
+   - previously there was no visual difference at all.
+--------------------------------------------------------------------------- */
+.as2p-tools-theme button { transition: background .12s, box-shadow .12s, border-color .12s; }
+
+.as2p-tools-theme .btn-dark, .as2p-tools-theme button[class*="btn-dark"] {
+  background: linear-gradient(180deg, #16324F 0%, #0F2438 100%) !important;
+  border: 1px solid #4DA3FF !important;
+  color: #EAF4FF !important;
+  box-shadow: 0 0 10px rgba(77,163,255,.28), inset 0 0 12px rgba(77,163,255,.10) !important;
+}
+.as2p-tools-theme .btn-dark:hover { box-shadow: 0 0 16px rgba(77,163,255,.45) !important; }
+.as2p-tools-theme .btn-dark:active,
+.as2p-tools-theme .btn-dark[aria-pressed="true"] {
+  background: #0A1826 !important;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.55) !important;
+  border-color: #2C6FB0 !important;
+}
+
+.as2p-tools-theme .btn-gold, .as2p-tools-theme button[class*="btn-gold"] {
+  background: linear-gradient(180deg, #402011 0%, #2A150B 100%) !important;
+  border: 1px solid #FF8A3D !important;
+  color: #FFD9BC !important;
+  box-shadow: 0 0 10px rgba(255,138,61,.28), inset 0 0 12px rgba(255,138,61,.10) !important;
+}
+.as2p-tools-theme .btn-gold:hover { box-shadow: 0 0 16px rgba(255,138,61,.48) !important; }
+.as2p-tools-theme .btn-gold:active {
+  background: #200F07 !important;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.55) !important;
+  border-color: #B85F22 !important;
+}
+
+.as2p-tools-theme .btn-outline, .as2p-tools-theme button[class*="btn-outline"] {
+  background: #101927 !important;
+  border: 1px solid #35557F !important;
+  color: #CFE0F5 !important;
+}
+.as2p-tools-theme .btn-outline:hover {
+  border-color: #4DA3FF !important;
+  box-shadow: 0 0 10px rgba(77,163,255,.25) !important;
+}
+.as2p-tools-theme .btn-outline:active { background: #0A121D !important; }
+
+/* Active tab / selected state must be unmistakable */
+.as2p-tools-theme [class*="border-b-2"][class*="border-brand"],
+.as2p-tools-theme [aria-selected="true"] {
+  border-color: var(--t-orange) !important;
+  color: #FFFFFF !important;
+}
+
+/* Header bar */
+.as2p-tools-theme header { background: #0D1420 !important; border-bottom: 1px solid var(--t-border); }
+.as2p-tools-theme header * { color: #E8EFF7 !important; }
+.as2p-tools-theme header [class*="text-brand-gold"] { color: var(--t-orange) !important; }
+
+/* Tailwind palette classes used in one or two places. Listed explicitly because
+   they match neither the arbitrary-hex catch-all nor the brand-* rules. */
+.as2p-tools-theme .bg-red-50 {
+  background-color: rgba(255, 99, 71, 0.14) !important;
+  border-color: rgba(255, 99, 71, 0.45) !important;
+}
+.as2p-tools-theme .bg-red-50 * { color: #FFB2A2 !important; }
+.as2p-tools-theme [class*="bg-white/"] { background-color: rgba(255,255,255,.08) !important; }
+
+/* ---------------------------------------------------------------------------
+   NEON-EDGE TREATMENT + PRESSED STATE  (rev 5)
+
+   The reference uses thin luminous borders rather than filled shapes. Buttons
+   get a blue or orange edge with a soft outer glow, and a clearly darker,
+   inset appearance while active - previously there was no pressed feedback at
+   all, so it was impossible to tell whether a click had registered.
+--------------------------------------------------------------------------- */
+.as2p-tools-theme .btn-dark,
+.as2p-tools-theme .btn-gold,
+.as2p-tools-theme .btn-outline,
+.as2p-tools-theme button {
+  transition: transform .06s ease, box-shadow .12s ease, filter .12s ease;
+}
+.as2p-tools-theme .btn-dark {
+  background: linear-gradient(180deg, #21456F 0%, #16304F 100%) !important;
+  border: 1px solid #4DA3FF !important;
+  color: #EAF3FF !important;
+  box-shadow: 0 0 0 1px rgba(77,163,255,.20), 0 0 14px rgba(77,163,255,.28);
+}
+.as2p-tools-theme .btn-gold {
+  background: linear-gradient(180deg, #5A3416 0%, #3E230E 100%) !important;
+  border: 1px solid #FF8A3D !important;
+  color: #FFE2CB !important;
+  box-shadow: 0 0 0 1px rgba(255,138,61,.20), 0 0 14px rgba(255,138,61,.28);
+}
+.as2p-tools-theme .btn-outline {
+  background: #101825 !important;
+  border: 1px solid #33517A !important;
+  color: #D7E5F7 !important;
+}
+.as2p-tools-theme .btn-dark:hover   { filter: brightness(1.18); }
+.as2p-tools-theme .btn-gold:hover   { filter: brightness(1.18); }
+.as2p-tools-theme .btn-outline:hover{ border-color: #4DA3FF !important; color: #EAF3FF !important; }
+
+/* pressed: darker, inset, no glow - unmistakable feedback */
+.as2p-tools-theme button:active:not(:disabled) {
+  filter: brightness(.72) !important;
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 5px rgba(0,0,0,.55) !important;
+}
+
+/* any remaining gold/amber accents retinted to the blue/orange palette */
+.as2p-tools-theme [class*="brand-gold"],
+.as2p-tools-theme [class*="text-brand-warning"] { color: #FF8A3D !important; }
+.as2p-tools-theme [class*="bg-brand-gold"] {
+  background: linear-gradient(180deg, #5A3416 0%, #3E230E 100%) !important;
+  border-color: #FF8A3D !important; color: #FFE2CB !important;
+}
+.as2p-tools-theme [class*="border-brand-gold"] { border-color: #FF8A3D !important; }
+
+/* section headers get a thin luminous rule, as in the reference */
+.as2p-tools-theme .card-header {
+  border-bottom: 1px solid #22304A !important;
+  box-shadow: inset 0 -1px 0 rgba(77,163,255,.22);
+}
+
+/* ---------------------------------------------------------------------------
+   SHELL OFFSET
+
+   The rails are fixed in the left gutter. EVERY direct child of the tool view -
+   header, settings panel, main - is offset by the same amount, so no section
+   can slide underneath them. The tool column and settings then run to within
+   24px of the right edge, which removes the wide empty gutter that was there.
+
+   .as2p-wide deliberately carries NO margin of its own: it inherits the offset
+   from its parent. Setting it in both places was what produced the double
+   indent and the clash.
+--------------------------------------------------------------------------- */
+.as2p-shell > header,
+.as2p-shell > main,
+.as2p-shell > div:not(.as2p-rail-stack) {
+  margin-left: 262px;
+  margin-right: 24px;
+}
+.as2p-shell .as2p-wide,
+.as2p-shell .as2p-rail-main {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  max-width: none !important;
+  width: auto !important;
+}
+
+@media (max-width: 1279px) {
+  .as2p-shell > header,
+  .as2p-shell > main,
+  .as2p-shell > div:not(.as2p-rail-stack) { margin-left: 12px; margin-right: 12px; }
+}
+
+/* ---------------------------------------------------------------------------
+   BRAND TOKEN OVERRIDE  (rev 6)
+
+   The tools use a fixed brand palette (brand-gold #C9A46A, brand-warm #FBF1E1,
+   brand-text #5A5445 ...). Every one of those is a LIGHT-theme value, so any
+   that the earlier rules missed rendered as dark-on-dark or gold-on-navy.
+
+   Rather than keep chasing individual components, every brand class is remapped
+   here to its dark-theme equivalent. This is the complete list taken from
+   tailwind.config.js, so nothing can be missed by omission:
+
+     brand-dark    #1C2333  ->  panel/surface
+     brand-gold    #C9A46A  ->  orange accent    (the "yellow" that looked wrong)
+     brand-cream   #F7F5F1  ->  surface
+     brand-warm    #FBF1E1  ->  amber notice tint
+     brand-border  #E8E2D5  ->  dark border
+     brand-text    #5A5445  ->  light text
+     brand-success #3D7A5C  ->  bright green
+     brand-warning #B8863B  ->  bright amber
+     brand-danger  #B84C3D  ->  bright red
+--------------------------------------------------------------------------- */
+.as2p-tools-theme .text-brand-text,
+.as2p-tools-theme .text-brand-dark   { color: #E8EFF7 !important; }
+.as2p-tools-theme .text-brand-muted  { color: #93A6BC !important; }
+.as2p-tools-theme .text-brand-border { color: #22304A !important; }
+.as2p-tools-theme .text-brand-gold   { color: #FF8A3D !important; }
+.as2p-tools-theme .text-brand-success{ color: #4DD091 !important; }
+.as2p-tools-theme .text-brand-warning{ color: #FFB454 !important; }
+.as2p-tools-theme .text-brand-danger { color: #FF7A66 !important; }
+
+.as2p-tools-theme .bg-brand-dark    { background-color: #0E1520 !important; }
+.as2p-tools-theme .bg-brand-cream   { background-color: #121924 !important; }
+.as2p-tools-theme .bg-brand-warm    { background-color: rgba(255,138,61,.13) !important; }
+.as2p-tools-theme .bg-brand-success { background-color: rgba(77,208,145,.15) !important; }
+.as2p-tools-theme .bg-brand-gold    { background-color: rgba(255,138,61,.18) !important; }
+
+.as2p-tools-theme .border-brand-border  { border-color: #22304A !important; }
+.as2p-tools-theme .border-brand-dark    { border-color: #33517A !important; }
+.as2p-tools-theme .border-brand-gold    { border-color: #FF8A3D !important; }
+.as2p-tools-theme .border-brand-success { border-color: rgba(77,208,145,.5) !important; }
+.as2p-tools-theme .border-brand-danger  { border-color: rgba(255,122,102,.5) !important; }
+
+/* The app header is brand-dark; keep it a shade above the page so the tool
+   view reads as layered rather than flat. */
+.as2p-shell > header { background-color: #0E1520 !important; border-bottom: 1px solid #22304A; }
+
+/* Tab strip: active tab gets the blue edge from the reference. */
+.as2p-tools-theme [class*="border-b-2"] { border-color: #4DA3FF !important; }
+
+/* Checkboxes and radios were invisible on dark. */
+.as2p-tools-theme input[type="checkbox"],
+.as2p-tools-theme input[type="radio"] {
+  accent-color: #4DA3FF;
+  background-color: #0E1520 !important;
+  border: 1px solid #33517A !important;
+}
+
+/* Scrollable report preview panes. */
+.as2p-tools-theme pre,
+.as2p-tools-theme [class*="font-mono"] {
+  background-color: #0B121C !important;
+  color: #D7E5F7 !important;
+  border-color: #22304A !important;
+}

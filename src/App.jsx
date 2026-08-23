@@ -171,7 +171,7 @@ export default function App() {
 
   return (
     <AppContext.Provider value={ctxValue}>
-      <div className="min-h-screen bg-[#070C14] text-brand-dark font-sans">
+      <div className="as2p-tools-theme as2p-shell min-h-screen font-sans">
         <header className="bg-brand-dark px-6 py-5">
           <div className="max-w-6xl mx-auto flex items-start justify-between gap-4">
             <div>
@@ -206,7 +206,7 @@ export default function App() {
         </header>
 
         {showSettings && (
-          <div className="as2p-tools-theme as2p-wide px-4 sm:px-6 pt-6 pb-10 rounded-lg my-4 shadow-2xl">
+          <div className="as2p-wide px-4 sm:px-6 pt-6 pb-10 rounded-lg my-4 shadow-2xl">
             <SettingsPanel
               keys={keys}
               models={models}
@@ -271,7 +271,7 @@ export default function App() {
           </div>
         </div>
 
-        <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-20">
+        <main className="as2p-wide px-4 sm:px-6 py-6 pb-20">
           {!hasKey && !showSettings && (
             <div className="bg-brand-warm border-2 border-brand-gold rounded-lg p-4 mb-6 flex items-center gap-3">
               <Settings size={18} className="text-brand-warning shrink-0" />
@@ -304,7 +304,6 @@ export default function App() {
             display:none preserves component state, timers and scroll position.
             Do not swap it for conditional rendering to "tidy the DOM".
           */}
-          <div className="as2p-tools-theme">
           <TokenRails
             provider={provider}
             usage={railUsage}
@@ -320,7 +319,6 @@ export default function App() {
               ) : null
             )}
           </TokenRails>
-          </div>
         </main>
 
         <footer className="border-t border-brand-border bg-white py-4 text-center text-[10px] text-brand-text/50">

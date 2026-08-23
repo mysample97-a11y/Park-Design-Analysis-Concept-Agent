@@ -51,7 +51,7 @@ export default function VegetationAnalyzer() {
     setCounting(true);
     try {
       const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
-      const exact = await countTokensExact({ provider, apiKey, model,
+      const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "analysis system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact
         ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
