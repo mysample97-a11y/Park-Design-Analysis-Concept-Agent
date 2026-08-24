@@ -490,3 +490,11 @@ input, textarea, select { color: #1C2333; }
   color: #D7E5F7 !important;
   border-color: #22304A !important;
 }
+
+/* Header inner container aligns with the tool column's inner padding, so the
+   title, the tab strip and the cards below all share one left edge. */
+.as2p-shell > header { padding-left: 1rem !important; padding-right: 1rem !important; }
+@media (min-width: 640px) {
+  .as2p-shell > header { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+}
+.as2p-shell > header > div { max-width: none !important; margin-left: 0 !important; }

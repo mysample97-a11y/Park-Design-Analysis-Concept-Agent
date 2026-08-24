@@ -83,6 +83,8 @@ export default function CombinedDocumentGenerator() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Partial success is not failure - a dropped tail field means thin sections.
+  const [insightWarning, setInsightWarning] = useState("");
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
 
@@ -187,6 +189,8 @@ export default function CombinedDocumentGenerator() {
           "\n" + (gapCheck.uncited_standards || []).map((g) => `- Standard that governs here: ${g.standard} - ${g.relevance}`).join("\n")
         : "");
     try {
+      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 6000,
@@ -210,8 +214,6 @@ export default function CombinedDocumentGenerator() {
         // Tells the model what is already written (so it is not repeated) and what
         // still needs writing. On a first run `done` is empty and this behaves
         // exactly like a normal single-pass call.
-        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
  const _merged = mergeChunk(chunkState, { sections: parsedResult.sections || parsedResult,
 
         completed: parsedResult.completed, remaining: parsedResult.remaining,
@@ -221,6 +223,14 @@ export default function CombinedDocumentGenerator() {
       setChunkState(_merged); savePartial("CMB", _merged);
 
       setResult({ ...parsedResult, ..._merged.sections });
+
+      // Field guard: a budget-limited run drops the TAIL of a schema and the report
+
+      // then prints "(not generated)" with nothing on screen explaining why.
+
+      const gaps = missingFields(parsedResult, ["matrix", "design_implications", "concept_brief"]);
+
+      setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
     } finally {
@@ -457,7 +467,7 @@ export default function CombinedDocumentGenerator() {
             <div className="space-y-1">{(result.design_implications || []).map((d, i) => (<p key={i} className="text-sm text-brand-dark">- {d}</p>))}</div>
           </div>
 
-          <div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
+          <div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}>
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-bold text-sm uppercase tracking-wide text-brand-warning">Concept Generator Brief (ready to paste)</h3>
               <button onClick={copyBrief} className="text-xs font-medium px-3 py-1.5 rounded-md flex items-center gap-1 bg-brand-dark text-white">{copied ? <CheckCircle2 size={13} /> : <Copy size={13} />} {copied ? "Copied!" : "Copy Brief"}</button>

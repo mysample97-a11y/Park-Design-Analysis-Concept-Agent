@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -20,7 +20,7 @@ const SCORE_CRITERIA = [
   { id: "design_ux", label: "Design Quality & UX" },
   { id: "feasibility", label: "Feasibility & Implementation" },
 ];
-const COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B", "#8A6A3A"];
+const COLORS = ["#E8EFF7", "#FF8A3D", "#4DD091", "#FFB454", "#8A6A3A"];
 
 function overallScore(concept) {
   const vals = SCORE_CRITERIA.map((c) => Number(concept.scores?.[c.id]) || 0);
@@ -62,6 +62,33 @@ export default function ConceptGenerator() {
   // the meter shows "-" rather than a fabricated figure.
   const toolEstimate = null;
   const noteUsage = (u) => setTokenUsage(recordUsage("CPT", u));
+  /*
+    NOTE: section-chunking (F13b) is deliberately NOT applied here.
+  
+    This tool already implements the same principle in a form that suits its
+    output: it generates concepts ONE AT A TIME, keeps every concept that
+    succeeded, names the ones that failed, and re-attempts only those on the
+    next press. Its unit of work is a whole concept, not a report section, so
+    layering section-chunking on top would duplicate the mechanism and could
+    fight it. Exact token counting still applies.
+  */
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const preview = JSON.stringify({ projectLocation, siteArea, numConcepts }).slice(0, 20000);
+      const exact = await countTokensExact({ provider, apiKey, model: undefined,
+        systemText: "concept generator system instruction and methodology checklist", userText: preview });
+      // Cost scales with the number of concepts requested, so the estimate must too.
+      const perCall = exact && exact.exact ? exact.input : null;
+      const n = Number(numConcepts) || 1;
+      setExactEstimate(perCall
+        ? { input: perCall * n, output: Math.ceil(2500 * 0.7) * n,
+            total: (perCall + Math.ceil(2500 * 0.7)) * n, calls: n, exact: true }
+        : { ...estimateRun({ userText: preview, maxTokens: 2500, calls: n }), exact: false });
+    } catch { setExactEstimate(null); } finally { setCounting(false); }
+  }
   // File ingestion. This tool previously accepted pasted text ONLY, so a user had to
   // open an exported report, select all, copy and paste it in by hand - for every run.
   const [briefFileNote, setBriefFileNote] = useState("");

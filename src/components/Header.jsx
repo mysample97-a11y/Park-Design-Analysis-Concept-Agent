@@ -3,7 +3,7 @@ import { Settings } from "lucide-react";
 export default function Header({ onToggleSettings, settingsOpen }) {
   return (
     <header className="bg-brand-dark px-6 py-5">
-      <div className="max-w-6xl mx-auto flex items-start justify-between gap-4">
+      <div className="w-full flex items-start justify-between gap-4">
         <div>
           <p className="text-xs tracking-[0.2em] uppercase text-brand-gold">
             Site Analysis Suite

@@ -141,3 +141,96 @@ export async function loadSessionFromFile(file, expectedTool = null) {
 }
 
 export default { buildSession, saveSessionToFile, loadSessionFromFile, SESSION_FORMAT, SESSION_VERSION };
+
+/* ===========================================================================
+ * WHOLE-APP SESSION  (F38 UI support)
+ *
+ * The per-tool helpers above take a state object the caller supplies. This pair
+ * works at the storage layer instead: it exports every key this app owns, which
+ * is what a user actually means by "save my session".
+ *
+ * WHAT IT CAPTURES
+ *   - partial insights per tool (as2p_partial_*)  - the expensive AI output
+ *   - token and request counters                  - so spend history survives
+ *   - declared tier limits
+ *
+ * WHAT IT DOES NOT CAPTURE, AND THIS MUST BE SAID IN THE UI
+ *   Form inputs that live only in React state (typed descriptions, uploaded
+ *   files, zone tables) are NOT in localStorage and cannot be exported this
+ *   way. Saving protects the AI output you paid for, not everything on screen.
+ *   Claiming otherwise would be worse than the limitation itself.
+ * ========================================================================= */
+
+const OWNED_PREFIXES = ["as2p_"];
+
+export function exportAppSession() {
+  const data = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !OWNED_PREFIXES.some((p) => k.startsWith(p))) continue;
+      if (FORBIDDEN.some((re) => re.test(k))) continue;   // never export a key
+      data[k] = localStorage.getItem(k);
+    }
+  } catch { /* private mode */ }
+  return {
+    format: SESSION_FORMAT,
+    version: SESSION_VERSION,
+    tool: "ALL",
+    savedAt: new Date().toISOString(),
+    app: "Al Safa 2 Site Analysis Suite",
+    storage: data,
+  };
+}
+
+export function saveAppSessionToFile() {
+  const session = exportAppSession();
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+  const name = `alsafa2-session-${stamp}.json`;
+  const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  return { name, keys: Object.keys(session.storage).length };
+}
+
+export async function loadAppSessionFromFile(file) {
+  if (!file) throw new Error("No file chosen.");
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    throw new Error("That is not a session file. Session files are the JSON produced by 'Save session'.");
+  }
+  if (!parsed || parsed.format !== SESSION_FORMAT) {
+    throw new Error("That JSON is not an Al Safa 2 session file - the format marker is missing.");
+  }
+  if (parsed.version > SESSION_VERSION) {
+    throw new Error(`That session was saved by a newer build (v${parsed.version}); this one understands up to v${SESSION_VERSION}.`);
+  }
+  const store = parsed.storage;
+  if (!store || typeof store !== "object") throw new Error("That session file contains no saved data.");
+
+  let restored = 0;
+  Object.keys(store).forEach((k) => {
+    if (!OWNED_PREFIXES.some((p) => k.startsWith(p))) return;   // never write foreign keys
+    if (FORBIDDEN.some((re) => re.test(k))) return;
+    try { localStorage.setItem(k, store[k]); restored++; } catch { /* ignore */ }
+  });
+
+  return {
+    restored,
+    savedAt: parsed.savedAt,
+    note:
+      `Restored ${restored} saved item${restored === 1 ? "" : "s"} from ` +
+      `${parsed.savedAt ? new Date(parsed.savedAt).toLocaleString() : "an earlier session"}. ` +
+      "Reload the page to see them. API keys are never stored in a session file, " +
+      "and form inputs you typed are not included - what is restored is the AI " +
+      "output already generated and your usage counters.",
+  };
+}

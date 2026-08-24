@@ -175,6 +175,8 @@ export default function VegetationAnalyzer() {
       general_reference_palette: PLANT_PALETTE.map((p) => ({ name: p.name, water: p.water, shade: p.shade, origin: p.origin })),
     };
     try {
+      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 1500,
@@ -198,8 +200,6 @@ export default function VegetationAnalyzer() {
         // Tells the model what is already written (so it is not repeated) and what
         // still needs writing. On a first run `done` is empty and this behaves
         // exactly like a normal single-pass call.
-        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
  const _merged = mergeChunk(chunkState, { sections: parsedInsight.sections || parsedInsight,
 
         completed: parsedInsight.completed, remaining: parsedInsight.remaining,
@@ -330,7 +330,7 @@ export default function VegetationAnalyzer() {
             rows={6}
             className="textarea"
           />
-          <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff", opacity: imageLoading ? 0.4 : 1, pointerEvents: imageLoading ? "none" : "auto" }}>
+          <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#4DA3FF", color: "#EAF3FF", backgroundColor: "#131C29", opacity: imageLoading ? 0.4 : 1, pointerEvents: imageLoading ? "none" : "auto" }}>
             <ImageIcon size={15} /> {imageLoading ? "Reading photos..." : `Upload Site Photos (up to ${MAX_IMAGES})`}
             <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="sr-only" />
           </label>
@@ -357,7 +357,7 @@ export default function VegetationAnalyzer() {
       </div>
 
       <div className="bg-white rounded-lg border border-brand-border p-4 flex gap-3">
-        <Mountain size={18} className="text-[#8A6A3A] shrink-0 mt-0.5" />
+        <Mountain size={18} className="text-[#FF8A3D] shrink-0 mt-0.5" />
         <div className="text-sm text-brand-text">
           <p><span className="font-semibold">Terrain:</span> {terrainNote || "No survey data supplied - terrain characteristics must be confirmed against a site survey before reliance."}</p>
           <p className="mt-1"><span className="font-semibold">Soil:</span> No public dataset found - unverified assumption until geotechnical data is sourced.</p>
@@ -407,14 +407,14 @@ export default function VegetationAnalyzer() {
               <strong>Partly generated.</strong> {insightWarning}
             </div>
           )}
-          {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
+          {insightError && (<div className="space-y-1"><p className="text-sm text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
           {insight && (
-            <div className="space-y-3 text-sm text-[#3A362C]">
+            <div className="space-y-3 text-sm text-[#E8EFF7]">
               {insight.terrain_soil_note && <p><span className="font-semibold">Terrain/Soil:</span> {insight.terrain_soil_note}</p>}
               {insight.inventory_guidance && <p><span className="font-semibold">Existing Vegetation:</span> {insight.inventory_guidance}</p>}
               {insight.suggested_species?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
-                  <p className="font-semibold text-[#8A6A3A] uppercase text-xs tracking-wide mb-1">Site-Specific Suggested Species</p>
+                  <p className="font-semibold text-[#FF8A3D] uppercase text-xs tracking-wide mb-1">Site-Specific Suggested Species</p>
                   {insight.suggested_species.map((s, i) => (<p key={i} className="text-xs">- <span className="font-semibold">{s.name}</span>: {s.reason}</p>))}
                 </div>
               )}
@@ -425,9 +425,9 @@ export default function VegetationAnalyzer() {
       </div>
 
       {insight?.conclusion && (
-        <div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
-          <h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2>
-          <p className="text-sm text-[#3A362C] leading-relaxed font-medium">{insight.conclusion}</p>
+        <div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}>
+          <h2 className="font-bold text-sm uppercase tracking-wide text-[#FF8A3D] mb-2">Conclusion</h2>
+          <p className="text-sm text-[#E8EFF7] leading-relaxed font-medium">{insight.conclusion}</p>
         </div>
       )}
 

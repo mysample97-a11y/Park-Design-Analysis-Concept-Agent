@@ -16,7 +16,7 @@ import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, gener
 import * as XLSX from "xlsx";
 
 
-const RISK_COLOR = { Low: "#3D7A5C", Medium: "#B8863B", High: "#B84C3D" };
+const RISK_COLOR = { Low: "#4DD091", Medium: "#FFB454", High: "#FF7A66" };
 
 export default function WindAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
@@ -170,10 +170,10 @@ export default function WindAnalyzer() {
   }
 
   function zoneFlag(z) {
-    if (z.wantsCooling && !z.hasScreening) return { label: "Good - open to prevailing NW breeze", color: "#3D7A5C" };
-    if (z.wantsCooling && z.hasScreening) return { label: "Review - screening may block wanted cooling", color: "#B8863B" };
-    if (!z.wantsCooling && !z.hasScreening) return { label: "Consider windbreak for spring dust-storm months", color: "#B84C3D" };
-    return { label: "Protected - screening in place", color: "#3D7A5C" };
+    if (z.wantsCooling && !z.hasScreening) return { label: "Good - open to prevailing NW breeze", color: "#4DD091" };
+    if (z.wantsCooling && z.hasScreening) return { label: "Review - screening may block wanted cooling", color: "#FFB454" };
+    if (!z.wantsCooling && !z.hasScreening) return { label: "Consider windbreak for spring dust-storm months", color: "#FF7A66" };
+    return { label: "Protected - screening in place", color: "#4DD091" };
   }
 
   async function generateInsight() {
@@ -186,6 +186,8 @@ export default function WindAnalyzer() {
       zones: zones.filter((z) => z.name.trim()).map((z) => ({ zone: z.name, wants_passive_cooling: z.wantsCooling, has_windbreak_screening: z.hasScreening, assessment: zoneFlag(z).label })),
     };
     try {
+      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500,
@@ -204,8 +206,6 @@ export default function WindAnalyzer() {
         // Tells the model what is already written (so it is not repeated) and what
         // still needs writing. On a first run `done` is empty and this behaves
         // exactly like a normal single-pass call.
-        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
  const _merged = mergeChunk(chunkState, { sections: parsedInsight.sections || parsedInsight,
 
         completed: parsedInsight.completed, remaining: parsedInsight.remaining,
@@ -451,16 +451,16 @@ export default function WindAnalyzer() {
               <strong>Partly generated.</strong> {insightWarning}
             </div>
           )}
-          {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
-          {insight && (<div className="space-y-1.5">{(insight.zone_recommendations || []).map((r, i) => (<p key={i} className="text-sm text-[#3A362C]"><span className="font-semibold">{r.zone}</span>: {r.recommendation}</p>))}</div>)}
+          {insightError && (<div className="space-y-1"><p className="text-sm text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
+          {insight && (<div className="space-y-1.5">{(insight.zone_recommendations || []).map((r, i) => (<p key={i} className="text-sm text-[#E8EFF7]"><span className="font-semibold">{r.zone}</span>: {r.recommendation}</p>))}</div>)}
           {!insight && !insightLoading && !insightError && <p className="text-sm text-brand-text/60">Name your zones above, mark cooling/screening intent, then generate wind-design guidance.</p>}
         </div>
       </div>
 
       {insight?.conclusion && (
-        <div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
-          <h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2>
-          <p className="text-sm text-[#3A362C] leading-relaxed font-medium">{insight.conclusion}</p>
+        <div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}>
+          <h2 className="font-bold text-sm uppercase tracking-wide text-[#FF8A3D] mb-2">Conclusion</h2>
+          <p className="text-sm text-[#E8EFF7] leading-relaxed font-medium">{insight.conclusion}</p>
         </div>
       )}
 

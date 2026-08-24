@@ -2,7 +2,11 @@ import React, { useState } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import { getUsage, recordUsage, resetUsage, estimateRun } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import {
+  buildChunkedPrompt, emptyState, mergeChunk, isComplete,
+  progressLabel, savePartial, loadPartial, clearPartial,
+} from "../utils/chunkedGeneration";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, fileToBase64Raw, fileToImagePart, extractJSON } from "../utils/helpers";
 import { useAppContext } from "../App";
@@ -10,8 +14,8 @@ import ToolIntro from "../components/ToolIntro";
 import ReportPreview from "../components/ReportPreview";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 
-const BTN_DARK = { backgroundColor: "#1C2333", color: "#FFFFFF" };
-const BTN_GOLD = { backgroundColor: "#C9A46A", color: "#1C2333" };
+const BTN_DARK = { backgroundColor: "#E8EFF7", color: "#0E1520" };
+const BTN_GOLD = { backgroundColor: "#FF8A3D", color: "#E8EFF7" };
 
 const CAPACITY_LOW = 150 / 10000;
 const CAPACITY_HIGH = 400 / 10000;
@@ -62,6 +66,32 @@ export default function SiteContextAnalyzer() {
   // usage is reported per tool so you can see which one is expensive.
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("SCX"));
   const noteUsage = (u) => setTokenUsage(recordUsage("SCX", u));
+  /*
+    CHUNKED INSIGHT (F13b). The model returns only sections it can COMPLETE and
+    declares what remains; whatever arrives is merged and kept, so a budget that
+    runs out mid-reply no longer discards the whole run. maxTokens is untouched.
+  */
+  const INSIGHT_TOPICS = [
+    { key: "findings", label: "Key findings" },
+    { key: "forward_constraints", label: "Forward constraints" },
+    { key: "conclusion", label: "Conclusions and recommendations" },
+  ];
+  const [chunkState, setChunkState] = useState(() => loadPartial("SCX", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
+  const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
+  const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  const [exactEstimate, setExactEstimate] = useState(null);
+  const [counting, setCounting] = useState(false);
+  async function calculateTokens() {
+    setCounting(true);
+    try {
+      const preview = JSON.stringify({ location, siteArea, description }).slice(0, 20000);
+      const exact = await countTokensExact({ provider, apiKey, model: undefined,
+        systemText: "site context system instruction and methodology checklist", userText: preview });
+      setExactEstimate(exact && exact.exact
+        ? { input: exact.input, output: Math.ceil(2500 * 0.7), total: exact.input + Math.ceil(2500 * 0.7), calls: 1, exact: true }
+        : { ...estimateRun({ userText: preview, maxTokens: 2500, calls: 1 }), exact: false });
+    } catch { setExactEstimate(null); } finally { setCounting(false); }
+  }
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -83,6 +113,9 @@ export default function SiteContextAnalyzer() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
+  // Partial success is not failure: a dropped tail field means some sections
+  // are thin, not that the run failed.
+  const [insightWarning, setInsightWarning] = useState("");
 
   async function handleImageUpload(e) {
     const files = Array.from(e.target.files || []).slice(0, 4);
@@ -188,7 +221,7 @@ export default function SiteContextAnalyzer() {
 
   async function generateInsight() {
     if (!context) { setInsightError("Run 'Analyze Site Context' above first - this insight builds on that analysis."); return; }
-    setInsightLoading(true); setInsight(null); setInsightError("");
+    setInsightLoading(true); setInsight(null); setInsightError(""); setInsightWarning("");
     const summary = {
       location: location || "Not specified",
       adjacencies: context.adjacencies,
@@ -206,15 +239,32 @@ export default function SiteContextAnalyzer() {
         provider,
         apiKey: apiKey,
         maxTokens: 4000,
-        prompt: prompt,
+        // Continuation-aware: the instruction names what is already written and
+        // what still needs writing. Empty on a first run.
+        prompt: prompt + chunkInstruction,
         systemInstruction: "You are an architectural strategy expert. Output valid JSON only.",
       });
 
       if (!resText) throw new Error("The AI returned an empty response.");
-      const parsedInsight = extractJSON(resText);
+     
+      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+        done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+ const parsedInsight = extractJSON(resText);
       if (!parsedInsight) throw new Error(
         "The AI's reply could not be read as structured data, even after recovery. Try again.");
-      setInsight(parsedInsight);
+      // Merge into accumulated state - never overwrites longer content with
+      // shorter, ignores invented keys, rejects a false completion claim.
+      const _merged = mergeChunk(chunkState, {
+        sections: parsedInsight.sections || parsedInsight,
+        completed: parsedInsight.completed, remaining: parsedInsight.remaining,
+        continuation_summary: parsedInsight.continuation_summary,
+      }, INSIGHT_TOPICS);
+      setChunkState(_merged); savePartial("SCX", _merged);
+      setInsight({ ...parsedInsight, ..._merged.sections });
+      // Field guard: a run short of budget drops the TAIL fields of a schema and
+      // the report then prints "(not generated)" with nothing on screen to say why.
+      const gaps = missingFields(parsedInsight, ["findings", "forward_constraints", "conclusion"]);
+      setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -420,8 +470,8 @@ export default function SiteContextAnalyzer() {
       <ToolIntro toolCode="SCX" />
 
       <header style={BTN_DARK} className="px-6 py-5">
-        <p className="text-xs tracking-[0.2em] uppercase" style={{ color: "#C9A46A" }}>Site Analysis Tool</p>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><MapPin size={20} style={{ color: "#C9A46A" }} /> Site Context, Urban Fabric & Accessibility</h1>
+        <p className="text-xs tracking-[0.2em] uppercase" style={{ color: "#FF8A3D" }}>Site Analysis Tool</p>
+        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><MapPin size={20} style={{ color: "#FF8A3D" }} /> Site Context, Urban Fabric & Accessibility</h1>
         <p className="text-sm mt-1" style={{ color: "#C9C6BE" }}>Give it your site's location, a description, or an image - it researches real adjacency and accessibility standards, then checks your zones/paths against them.</p>
       </header>
 
@@ -432,7 +482,7 @@ export default function SiteContextAnalyzer() {
             <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Project location (e.g. Riverside Park, Chicago, USA)" className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-2.5 focus:border-[#C9A46A] outline-none" />
             <input type="number" value={siteArea} onChange={(e) => setSiteArea(e.target.value)} placeholder="Total site area in m2 (optional - enables capacity estimate and proposed zones)" className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-2.5 focus:border-[#C9A46A] outline-none font-mono" />
             <textarea value={siteDescription} onChange={(e) => setSiteDescription(e.target.value)} placeholder="Describe what's around the site (adjacent buildings, roads, land uses) - or upload a GIS/map image below instead" rows={4} className="w-full text-sm bg-[#F7F5F1] border-2 border-[#E8E2D5] rounded-md p-3 focus:border-[#C9A46A] outline-none resize-y" />
-            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
+            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer w-fit" style={{ borderColor: "#4DA3FF", color: "#EAF3FF", backgroundColor: "#131C29" }}>
               <ImageIcon size={15} /> {imageLoading ? "Reading images..." : "Upload Site / GIS Map Images (up to 4, optional)"}
               <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="sr-only" />
             </label>
@@ -453,7 +503,7 @@ export default function SiteContextAnalyzer() {
               <Search size={18} /> {contextLoading ? "Researching site context..." : "Analyze Site Context"}
             </button>
             {contextLoading && <p className="text-xs text-[#8A8474]">Reading your input and, if needed, searching for real local accessibility standards - this can take a moment.</p>}
-            {contextError && (<div className="space-y-1"><p className="text-xs text-[#3A362C] flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(contextError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-4">Technical: {contextError}</p></div>)}
+            {contextError && (<div className="space-y-1"><p className="text-xs text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(contextError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-4">Technical: {contextError}</p></div>)}
             {context?.note && <p className="text-xs text-[#B8863B] flex items-center gap-1"><Info size={12} /> {context.note}</p>}
           </div>
         </div>
@@ -484,14 +534,14 @@ export default function SiteContextAnalyzer() {
             <button onClick={addZone} style={BTN_GOLD} className="text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1"><Plus size={13} /> Add zone</button>
           </div>
           {(autoZoneLoading || autoZoneNote) && (
-            <p className="text-[10px] mb-2 flex items-start gap-1" style={{ color: autoZoneLoading ? "#8A8474" : "#3D7A5C" }}>
+            <p className="text-[10px] mb-2 flex items-start gap-1" style={{ color: autoZoneLoading ? "#93A6BC" : "#4DD091" }}>
               <Info size={10} className="mt-0.5 flex-shrink-0" /> {autoZoneLoading ? "Proposing zones from the site context..." : autoZoneNote}
             </p>
           )}
           <div className="hidden">
           </div>
           <div className="p-4 space-y-2">
-            {zones.map((z) => { const c = capacityRange(z.area); return (<div key={z.id} className="flex items-center gap-2 text-sm"><input value={z.name} onChange={(e) => updateZone(z.id, { name: e.target.value })} placeholder="Zone name" className="flex-1 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-2 py-1.5 focus:border-[#C9A46A] outline-none" /><input type="number" value={z.area} onChange={(e) => updateZone(z.id, { area: e.target.value })} placeholder="Area m2" className="w-24 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-2 py-1.5 font-mono focus:border-[#C9A46A] outline-none" /><span className="w-32 text-xs font-mono text-[#8A6A3A] text-right">{z.area ? `${c.low}-${c.high} visitors` : "--"}</span><button onClick={() => removeZone(z.id)} className="text-[#B8A98F] hover:text-[#B84C3D]"><Trash2 size={14} /></button></div>); })}
+            {zones.map((z) => { const c = capacityRange(z.area); return (<div key={z.id} className="flex items-center gap-2 text-sm"><input value={z.name} onChange={(e) => updateZone(z.id, { name: e.target.value })} placeholder="Zone name" className="flex-1 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-2 py-1.5 focus:border-[#C9A46A] outline-none" /><input type="number" value={z.area} onChange={(e) => updateZone(z.id, { area: e.target.value })} placeholder="Area m2" className="w-24 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-2 py-1.5 font-mono focus:border-[#C9A46A] outline-none" /><span className="w-32 text-xs font-mono text-[#FF8A3D] text-right">{z.area ? `${c.low}-${c.high} visitors` : "--"}</span><button onClick={() => removeZone(z.id)} className="text-[#B8A98F] hover:text-[#B84C3D]"><Trash2 size={14} /></button></div>); })}
           </div>
         </div>
 
@@ -519,7 +569,7 @@ export default function SiteContextAnalyzer() {
                   <div className="flex items-center gap-3 text-xs">
                     <label className="flex items-center gap-1">Width (m)<input type="number" step="0.1" value={p.width} onChange={(e) => updatePath(p.id, { width: e.target.value })} className="w-16 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-1.5 py-1 font-mono" /></label>
                     {p.type === "ramp" && (<label className="flex items-center gap-1">Level change (m)<input type="number" step="0.1" value={p.levelChange} onChange={(e) => updatePath(p.id, { levelChange: e.target.value })} className="w-16 bg-[#F7F5F1] border border-[#E8E2D5] rounded px-1.5 py-1 font-mono" /></label>)}
-                    <span className="flex items-center gap-1 ml-auto" style={{ color: c.status === "pass" ? "#3D7A5C" : c.status === "review" ? "#B8863B" : "#8A8474" }}>{STATUS_ICON[c.status]} {c.label}</span>
+                    <span className="flex items-center gap-1 ml-auto" style={{ color: c.status === "pass" ? "#4DD091" : c.status === "review" ? "#FFB454" : "#93A6BC" }}>{STATUS_ICON[c.status]} {c.label}</span>
                   </div>
                 </div>
               );
@@ -535,14 +585,14 @@ export default function SiteContextAnalyzer() {
             </button>
           </div>
           {insightLoading && <p className="text-sm text-[#8A8474]">Reviewing adjacency, capacity, and accessibility data...</p>}
-          {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(insightError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-5">Technical: {insightError}</p></div>)}
+          {insightError && (<div className="space-y-1"><p className="text-sm text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(insightError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-5">Technical: {insightError}</p></div>)}
           {insight && (
             <div className="space-y-3">
-              <div className="space-y-1">{keyFindings().map((f, i) => (<p key={i} className="text-sm text-[#3A362C]">- {f}</p>))}</div>
+              <div className="space-y-1">{keyFindings().map((f, i) => (<p key={i} className="text-sm text-[#E8EFF7]">- {f}</p>))}</div>
 
               {adjacencies()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
-                  <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Adjacent land use by edge</p>
+                  <p className="text-xs font-semibold text-[#FF8A3D] uppercase tracking-wide mb-1">Adjacent land use by edge</p>
                   {adjacencies().map((a, i) => (
                     <p key={i} className="text-xs text-[#5A5445] mb-1">
                       <span className="font-semibold">{a.direction}:</span> {a.land_use} - {a.demand_implication} <span className="text-brand-success">{a.design_response}</span>
@@ -553,7 +603,7 @@ export default function SiteContextAnalyzer() {
 
               {zoning()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
-                  <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Suggested edge character</p>
+                  <p className="text-xs font-semibold text-[#FF8A3D] uppercase tracking-wide mb-1">Suggested edge character</p>
                   {zoning().map((q, i) => (
                     <p key={i} className="text-xs text-[#5A5445]"><span className="font-semibold">{q.edge}:</span> {q.suggested_character} - {q.reason}</p>
                   ))}
@@ -574,20 +624,20 @@ export default function SiteContextAnalyzer() {
 
               {accessStandards()?.length > 0 && (
                 <div className="border-t border-[#F0EBDF] pt-2">
-                  <p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Accessibility standards applied</p>
+                  <p className="text-xs font-semibold text-[#FF8A3D] uppercase tracking-wide mb-1">Accessibility standards applied</p>
                   {accessStandards().map((a, i) => (
                     <p key={i} className="text-xs text-[#5A5445]"><span className="font-semibold">{a.requirement}:</span> {a.value} <span className="text-[10px]">({a.source})</span></p>
                   ))}
                 </div>
               )}
 
-              {insight.constraints?.length > 0 && (<div className="border-t border-[#F0EBDF] pt-2"><p className="text-xs font-semibold text-[#8A6A3A] uppercase tracking-wide mb-1">Constraints to carry into Concept Generator</p>{insight.constraints.map((f, i) => (<p key={i} className="text-xs text-[#5A5445]">- {f}</p>))}</div>)}
+              {insight.constraints?.length > 0 && (<div className="border-t border-[#F0EBDF] pt-2"><p className="text-xs font-semibold text-[#FF8A3D] uppercase tracking-wide mb-1">Constraints to carry into Concept Generator</p>{insight.constraints.map((f, i) => (<p key={i} className="text-xs text-[#5A5445]">- {f}</p>))}</div>)}
             </div>
           )}
           {!insight && !insightLoading && !insightError && <p className="text-sm text-[#8A8474]">Analyze site context above (Step 1), fill in zones/paths, then generate a synthesis.</p>}
         </div>
 
-        {overallConclusion() && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2><p className="text-sm text-[#3A362C] leading-relaxed font-medium">{overallConclusion()}</p></div>)}
+        {overallConclusion() && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#FF8A3D] mb-2">Conclusion</h2><p className="text-sm text-[#E8EFF7] leading-relaxed font-medium">{overallConclusion()}</p></div>)}
 
         <ReportPreview
 

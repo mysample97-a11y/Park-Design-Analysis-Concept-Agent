@@ -27,23 +27,16 @@ const TABS = [
 export const AppContext = createContext(null);
 
 /**
- * Tools kept mounted once visited, so switching tabs never destroys work.
- * Registry form keeps the mount rule in one place rather than repeated per tool.
+ * Tool code per tab, for the usage rail.
+ * Strings only - deliberately no component references, so this is safe at module
+ * scope even though App.jsx and the analyzers import each other. Anything that
+ * touches an analyzer binding must be built inside the component instead.
  */
-/** Tool code per tab, for the usage rail. */
-const TAB_TOOL_CODE = { site: "SCX", solar: "SOL", survey: "SUR", wind: "WND",
-  veg: "VEG", concept: "CPT", budget: "BDG", combined: "CMB" };
+const TAB_TOOL_CODE = {
+  site: "SCX", solar: "SOL", survey: "SUR", wind: "WND",
+  veg: "VEG", concept: "CPT", budget: "BDG", combined: "CMB",
+};
 
-const TOOL_PANELS = [
-  { id: "site", Component: SiteContextAnalyzer },
-  { id: "solar", Component: SolarAnalyzer },
-  { id: "survey", Component: SurveyAnalyzer },
-  { id: "wind", Component: WindAnalyzer },
-  { id: "veg", Component: VegetationAnalyzer },
-  { id: "concept", Component: ConceptGenerator },
-  { id: "budget", Component: BudgetTracker },
-  { id: "combined", Component: CombinedDocumentGenerator },
-];
 
 export function useAppContext() {
   const ctx = useContext(AppContext);
@@ -55,6 +48,31 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("site");
   // Tools that have been opened at least once. Mount-once, keep-alive.
   const [visitedTabs, setVisitedTabs] = useState(() => new Set());
+  /*
+    MUST stay INSIDE the component.
+  
+    App.jsx imports every analyzer, and every analyzer imports App.jsx back for
+    useAppContext - a circular import. That cycle is harmless as long as nothing
+    is evaluated at MODULE scope, because useAppContext only runs at render time.
+  
+    Declaring this array at module scope broke that: it reads the analyzer
+    bindings during module initialisation, and whichever module the bundler
+    evaluates first sees the other's bindings still uninitialised. The result was
+    "Cannot access 'Re' before initialization" - a TDZ error naming a minified
+    variable, which is why it was so hard to place.
+  
+    Built here, it is evaluated on first render, long after both modules exist.
+  */
+  const TOOL_PANELS = [
+    { id: "site", Component: SiteContextAnalyzer },
+    { id: "solar", Component: SolarAnalyzer },
+    { id: "survey", Component: SurveyAnalyzer },
+    { id: "wind", Component: WindAnalyzer },
+    { id: "veg", Component: VegetationAnalyzer },
+    { id: "concept", Component: ConceptGenerator },
+    { id: "budget", Component: BudgetTracker },
+    { id: "combined", Component: CombinedDocumentGenerator },
+  ];
   // Live usage for the rail. Polled rather than lifted through context so no
   // tool has to be rewired; the store is localStorage and reads are cheap.
   const [railUsage, setRailUsage] = useState(() => getUsage("SCX"));
@@ -173,7 +191,7 @@ export default function App() {
     <AppContext.Provider value={ctxValue}>
       <div className="as2p-tools-theme as2p-shell min-h-screen font-sans">
         <header className="bg-brand-dark px-6 py-5">
-          <div className="max-w-6xl mx-auto flex items-start justify-between gap-4">
+          <div className="w-full flex items-start justify-between gap-4">
             <div>
               <p className="text-xs tracking-[0.2em] uppercase text-brand-gold">
                 Al Safa 2 — AI Park Competition
@@ -249,7 +267,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-10 bg-brand-cream rounded-lg my-4 shadow-2xl">
+        <div className="as2p-wide px-4 sm:px-6 pt-6 pb-10 bg-brand-cream rounded-lg my-4 shadow-2xl">
           <div className="flex gap-2 border-b-2 border-brand-border pb-1 overflow-x-auto whitespace-nowrap">
             {TABS.map((tab) => {
               const Icon = tab.icon;

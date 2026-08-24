@@ -70,9 +70,9 @@ function clearSkyIrradiance(dayOfYear, elevationDeg) {
 
 function azimuthToCompass(az) { return DIRECTIONS[Math.round(az / 45) % 8]; }
 function heatTier(elevation) {
-  if (elevation >= 55) return { label: "High", color: "#B84C3D" };
-  if (elevation >= 25) return { label: "Medium", color: "#B8863B" };
-  return { label: "Low", color: "#3D7A5C" };
+  if (elevation >= 55) return { label: "High", color: "#FF7A66" };
+  if (elevation >= 25) return { label: "Medium", color: "#FFB454" };
+  return { label: "Low", color: "#4DD091" };
 }
 
 function buildDayData(month, day, lat, lon, utcOffset) {
@@ -450,11 +450,11 @@ export default function SolarAnalyzer() {
           )}</div>`
         : "") + (dayData.length
         ? barChartSVG(dayData.map((r) => ({ label: r.hourLabel, value: r.ghi || 0, display: (r.ghi || 0) + " W/m2" })),
-            { title: `Clear-sky solar irradiance - ${activePreset.label}  (total ${dailyInsolation().toFixed(2)} kWh/m2/day)`, color: "#B8863B" })
+            { title: `Clear-sky solar irradiance - ${activePreset.label}  (total ${dailyInsolation().toFixed(2)} kWh/m2/day)`, color: "#FFB454" })
           + barChartSVG(dayData.map((r) => ({ label: `${r.hourLabel}  (${r.compass})`, value: r.elevation, display: r.elevation + " deg" })),
             { title: `Sun elevation - ${activePreset.label}` })
           + barChartSVG(zones.filter((z) => z.name.trim()).map((z) => ({ label: z.name, value: exposedHours(z).length*0.5, display: (exposedHours(z).length*0.5).toFixed(1) + " h" })),
-            { title: "Unshaded medium/high exposure by zone", color: "#B84C3D" })
+            { title: "Unshaded medium/high exposure by zone", color: "#FF7A66" })
         : ""),
       interpretation: [insight?.site_wide_finding, insight?.thermal_comfort_note, insight?.conclusion]
         .filter(Boolean).join("\n\n"),
@@ -511,7 +511,7 @@ export default function SolarAnalyzer() {
           <button onClick={resolveLocation} disabled={siteLoading || !apiKey} className="btn-gold w-full">
             <Search size={18} /> {siteLoading ? "Finding coordinates..." : "Set Location & Compute Sun Path"}
           </button>
-          {siteError && (<div className="space-y-1"><p className="text-xs text-[#3A362C] flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(siteError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-4">Technical: {siteError}</p></div>)}
+          {siteError && (<div className="space-y-1"><p className="text-xs text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(siteError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-4">Technical: {siteError}</p></div>)}
           {siteInfo && <p className="text-xs text-brand-success">Resolved: {siteInfo.resolved_name} ({siteInfo.lat}, {siteInfo.lon}, UTC{siteInfo.utc_offset >= 0 ? "+" : ""}{siteInfo.utc_offset}) - {siteInfo.source}</p>}
         </div>
       </div>
@@ -526,13 +526,13 @@ export default function SolarAnalyzer() {
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text mb-3">Sun Elevation Through the Day</h2>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={dayData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D5" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#22304A" />
                 <XAxis dataKey="hourLabel" tick={{ fontSize: 11 }} interval={1} />
                 <YAxis tick={{ fontSize: 11 }} label={{ value: "Elevation deg", angle: -90, position: "insideLeft", fontSize: 11 }} />
-                <ReferenceArea y1={55} y2={90} fill="#B84C3D" fillOpacity={0.06} />
-                <ReferenceArea y1={25} y2={55} fill="#B8863B" fillOpacity={0.06} />
+                <ReferenceArea y1={55} y2={90} fill="#FF7A66" fillOpacity={0.06} />
+                <ReferenceArea y1={25} y2={55} fill="#FFB454" fillOpacity={0.06} />
                 <Tooltip formatter={(v, n, p) => [`${v} deg (sun from ${p.payload.compass})`, "Elevation"]} />
-                <Line type="monotone" dataKey="elevation" stroke="#1C2333" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="elevation" stroke="#E8EFF7" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -560,7 +560,7 @@ export default function SolarAnalyzer() {
                         </p>
                       <div className="flex flex-wrap gap-1.5">{DIRECTIONS.map((d) => (<button key={d} onClick={() => toggleShaded(z.id, d)} className={`w-9 h-8 rounded text-xs font-medium border transition ${z.shaded.includes(d) ? "bg-brand-success text-white border-brand-success" : "bg-white text-brand-dark border-[#DDD6C9]"}`}>{d}</button>))}</div>
                     </div>
-                    <p className="text-xs"><span className="font-semibold" style={{ color: exposed.length > 6 ? "#B84C3D" : exposed.length > 2 ? "#B8863B" : "#3D7A5C" }}>{(exposed.length*0.5).toFixed(1)} hours</span> of Medium/High sun exposure, unshaded.</p>
+                    <p className="text-xs"><span className="font-semibold" style={{ color: exposed.length > 6 ? "#FF7A66" : exposed.length > 2 ? "#FFB454" : "#4DD091" }}>{(exposed.length*0.5).toFixed(1)} hours</span> of Medium/High sun exposure, unshaded.</p>
                   </div>
                 );
               })}
@@ -607,13 +607,13 @@ export default function SolarAnalyzer() {
                   <strong>Partly generated.</strong> {insightWarning}
                 </div>
               )}
-              {insightError && (<div className="space-y-1"><p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
-              {insight && (<div className="space-y-1.5">{(insight.zone_recommendations || []).map((r, i) => (<p key={i} className="text-sm text-[#3A362C]"><span className="font-semibold">{r.zone}</span>: {r.recommendation}</p>))}</div>)}
+              {insightError && (<div className="space-y-1"><p className="text-sm text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(insightError)}</p><p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical: {insightError}</p></div>)}
+              {insight && (<div className="space-y-1.5">{(insight.zone_recommendations || []).map((r, i) => (<p key={i} className="text-sm text-[#E8EFF7]"><span className="font-semibold">{r.zone}</span>: {r.recommendation}</p>))}</div>)}
               {!insight && !insightLoading && !insightError && <p className="text-sm text-brand-text/60">Name your zones above, mark what's already shaded, then generate zone-specific shade recommendations.</p>}
             </div>
           </div>
 
-          {insight?.conclusion && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2><p className="text-sm text-[#3A362C] leading-relaxed font-medium">{insight.conclusion}</p></div>)}
+          {insight?.conclusion && (<div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}><h2 className="font-bold text-sm uppercase tracking-wide text-[#FF8A3D] mb-2">Conclusion</h2><p className="text-sm text-[#E8EFF7] leading-relaxed font-medium">{insight.conclusion}</p></div>)}
 
           <div className="card">
             <ReportPreview

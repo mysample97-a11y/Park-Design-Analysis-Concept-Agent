@@ -47,8 +47,8 @@ export default function ReportPreview({ reportText, chartsHtml, docRef, onRegene
       {open && (
         <div className="p-4 space-y-3">
           {missingInsight && (
-            <div className="rounded-md border-2 p-3 flex gap-2" style={{ borderColor: "#B8863B", backgroundColor: "#FBF1E1" }}>
-              <Info size={14} style={{ color: "#B8863B", flexShrink: 0, marginTop: 2 }} />
+            <div className="rounded-md border-2 p-3 flex gap-2" style={{ borderColor: "rgba(255,180,84,0.55)", backgroundColor: "rgba(255,180,84,0.13)", color: "#FFC79A" }}>
+              <Info size={14} style={{ color: "#FFB454", flexShrink: 0, marginTop: 2 }} />
               <p className="text-[11px] text-brand-text">
                 <strong>Sections 8 and 10 are empty.</strong> The findings below are complete, but the
                 model did not return an interpretation or conclusions - usually a truncated reply
@@ -57,10 +57,9 @@ export default function ReportPreview({ reportText, chartsHtml, docRef, onRegene
             </div>
           )}
           {(sourceNote || sourceCount > 0) && (
-            <div className="flex items-start gap-2 rounded p-2.5 border"
-                 style={{ borderColor: sourceCount > 0 ? "#3D7A5C55" : "#B8863B55",
-                          background: sourceCount > 0 ? "#F1F7F3" : "#FBF6EC" }}>
-              <Info size={14} className="shrink-0 mt-0.5" style={{ color: sourceCount > 0 ? "#3D7A5C" : "#B8863B" }} />
+            <div className={"flex items-start gap-2 rounded p-2.5 border " +
+                 (sourceCount > 0 ? "bg-[#EAF3EC] border-brand-success" : "bg-[#FBF3E4] border-brand-warning")}>
+              <Info size={14} className="shrink-0 mt-0.5" style={{ color: sourceCount > 0 ? "#4DD091" : "#FFB454", flexShrink: 0 }} />
               <p className="text-[10px] text-brand-text">
                 {sourceCount > 0
                   ? <><strong>{sourceCount} live source{sourceCount === 1 ? "" : "s"} used.</strong> They are listed in section 11 of this report, so every researched claim can be traced.</>

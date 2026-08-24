@@ -34,6 +34,7 @@ import {
   formatTokens, requestWindows, getLimits, saveLimits, capacityCheck,
   getLiveLimits, resetRequests, PUBLISHED_LIMITS,
 } from "../utils/tokenMeter";
+import { saveAppSessionToFile, loadAppSessionFromFile } from "../utils/session";
 
 const PANEL = {
   // Same visual language as the tool shell: dark surface, cool border, a faint
@@ -235,6 +236,7 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
 
 /** RIGHT RAIL - what you have spent. */
 export function UsageRail({ usage, provider = "claude", partial = null, onReset = null }) {
+  const [sessionNote, setSessionNote] = React.useState("");
   const u = usage || { total: 0, input: 0, output: 0, calls: 0, estimated: false };
   return (
     <div style={PANEL}>
@@ -275,6 +277,55 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
           </div>
         </div>
       )}
+
+      {/* F38 - session save / load. Purely local: a Blob download and a file
+          input, no server involved, so the no-backend architecture is intact.
+          The note states plainly what is and is not captured. */}
+      <div style={{ marginTop: 11, paddingTop: 9, borderTop: "1px solid #22304A" }}>
+        <div style={LABEL}>Session</div>
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              const r = saveAppSessionToFile();
+              setSessionNote(`Saved ${r.keys} item(s) to ${r.name}.`);
+            } catch (e) { setSessionNote("Could not save: " + (e.message || "unknown error")); }
+          }}
+          style={{ width: "100%", marginTop: 5, padding: "5px 8px", fontSize: 10.5,
+            background: "#101825", color: "#D7E5F7", border: "1px solid #33517A",
+            borderRadius: 6, cursor: "pointer" }}
+        >
+          Save session to file
+        </button>
+        <label
+          style={{ display: "block", width: "100%", marginTop: 5, padding: "5px 8px",
+            fontSize: 10.5, background: "#101825", color: "#D7E5F7",
+            border: "1px solid #33517A", borderRadius: 6, cursor: "pointer", textAlign: "center" }}
+        >
+          Load session from file
+          <input
+            type="file" accept="application/json,.json" style={{ display: "none" }}
+            onChange={async (e) => {
+              const f = e.target.files && e.target.files[0];
+              e.target.value = "";
+              if (!f) return;
+              try {
+                const r = await loadAppSessionFromFile(f);
+                setSessionNote(r.note);
+              } catch (err) { setSessionNote(err.message || "Could not load that file."); }
+            }}
+          />
+        </label>
+        {sessionNote && (
+          <div style={{ fontSize: 9.5, color: "#93A6BC", marginTop: 6, lineHeight: 1.45 }}>
+            {sessionNote}
+          </div>
+        )}
+        <div style={{ fontSize: 9.5, color: "#7E90A6", marginTop: 6, lineHeight: 1.4 }}>
+          Saves generated AI output and usage counters. API keys are never written
+          to the file, and text you typed into the form is not included.
+        </div>
+      </div>
 
       {onReset && (
         <button

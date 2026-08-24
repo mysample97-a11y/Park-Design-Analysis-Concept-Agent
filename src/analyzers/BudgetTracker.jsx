@@ -31,9 +31,9 @@ const DEFAULT_RATES = {
 };
 
 const CONFIDENCE_COLOR = {
-  "Verified-Macro": "#3D7A5C",
-  "Verified-Adjacent-Scale": "#B8863B",
-  "Assumption-Flagged": "#B84C3D",
+  "Verified-Macro": "#4DD091",
+  "Verified-Adjacent-Scale": "#FFB454",
+  "Assumption-Flagged": "#FF7A66",
 };
 
 export default function BudgetTracker() {
@@ -71,6 +71,8 @@ export default function BudgetTracker() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState("");
+  // Partial success is not failure - a dropped tail field means thin sections.
+  const [insightWarning, setInsightWarning] = useState("");
   // Token accounting. Read once on mount from localStorage so the figure
   // survives a reload - the whole point is to see spend accumulate across a
   // session, including after swapping in a different key.
@@ -681,6 +683,8 @@ export default function BudgetTracker() {
       const headroom = cap && bestCapex && Number.isFinite(bestCapex) ? cap - bestCapex : null;
       const headroomPct = cap && headroom !== null ? Math.round((headroom / cap) * 100) : null;
 
+      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 2500,
@@ -729,8 +733,6 @@ export default function BudgetTracker() {
         // Tells the model what is already written (so it is not repeated) and what
         // still needs writing. On a first run `done` is empty and this behaves
         // exactly like a normal single-pass call.
-        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
  const _merged = mergeChunk(chunkState, { sections: parsedInsight.sections || parsedInsight,
 
         completed: parsedInsight.completed, remaining: parsedInsight.remaining,
@@ -740,6 +742,14 @@ export default function BudgetTracker() {
       setChunkState(_merged); savePartial("BDG", _merged);
 
       setInsight({ ...parsedInsight, ..._merged.sections });
+
+      // Field guard: a budget-limited run drops the TAIL of a schema and the report
+
+      // then prints "(not generated)" with nothing on screen explaining why.
+
+      const gaps = missingFields(parsedInsight, ["observations", "confidence_note", "conclusion", "optimisations", "bottlenecks"]);
+
+      setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
@@ -872,7 +882,7 @@ export default function BudgetTracker() {
       chartsHtml: tableHTML(["Facility", "Area m2", "Rate", "Subtotal"],
           costedFacilities.filter((f) => f.name.trim()).map((f) => [f.name, f.area, f.rate, formatNumber((Number(f.area)||0)*(Number(f.rate)||0))]),
           "Facility schedule")
-        + barChartSVG(wrapperRows.map((r) => ({ label: r.label, value: r.amount, display: formatNumber(r.amount), color: r.bold ? "#1C2333" : "#C9A46A" })),
+        + barChartSVG(wrapperRows.map((r) => ({ label: r.label, value: r.amount, display: formatNumber(r.amount), color: r.bold ? "#E8EFF7" : "#FF8A3D" })),
             { title: "Cost build-up" }),
       interpretation: insight?.conclusion || "",
       conclusions: (insight?.observations || []),
@@ -950,7 +960,7 @@ export default function BudgetTracker() {
 
       <div className="card">
         {mixedSchedule && (
-        <div className="rounded-md border-2 p-3 mb-3" style={{ borderColor: "#B8863B", backgroundColor: "#FBF1E1" }}>
+        <div className="rounded-md border-2 p-3 mb-3" style={{ borderColor: "#FFB454", backgroundColor: "rgba(255,255,255,0.03)" }}>
           <p className="text-[11px] text-brand-text">
             <strong>This estimate costs one concept.</strong> The schedule holds {facilities.filter((f) => f.name.trim()).length} items
             across {scheduleConcepts.length} concepts. Concepts are alternatives - adding them together would describe a park
@@ -1022,7 +1032,7 @@ export default function BudgetTracker() {
               {facilities.filter((f) => f.rateBasis).map((f) => (
                 <p key={f.id} className="text-[10px] text-brand-text">
                   <span className="font-semibold">{f.name}:</span> {f.rate} {currency}/m2 -
-                  <span style={{ color: CONFIDENCE_COLOR[f.rateConfidence] || "#5A5445" }}> {f.rateConfidence}</span> - {f.rateBasis}
+                  <span style={{ color: CONFIDENCE_COLOR[f.rateConfidence] || "#C3D2E4" }}> {f.rateConfidence}</span> - {f.rateBasis}
                 </p>
               ))}
             </div>
@@ -1064,7 +1074,7 @@ export default function BudgetTracker() {
       <div className="card">
         <div className="card-header">Concept estimates and comparison</div>
         <div className="p-4 space-y-3">
-          <div className="rounded-md p-3" style={{ backgroundColor: "#FBF1E1", border: "1px solid #E8E2D5" }}>
+          <div className="rounded-md p-3" style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid #22304A" }}>
             <p className="text-[11px] text-brand-text mb-2">
               <strong>Three steps, deliberately separate.</strong> Calculate is arithmetic and uses no AI at all.
               Compare and Insight are one AI call each, so a full analysis costs two calls rather than one per concept.
@@ -1082,14 +1092,14 @@ export default function BudgetTracker() {
               </button>
               <span className="text-[10px] text-brand-muted">then 3 · Generate AI Insight below</span>
             </div>
-            {calcError && <p className="text-[10px] mt-2" style={{ color: calculated ? "#3D7A5C" : "#B84C3D" }}>{calcError}</p>}
+            {calcError && <p className="text-[10px] mt-2" style={{ color: calculated ? "#4DD091" : "#FF7A66" }}>{calcError}</p>}
             {compareError && <p className="text-[10px] mt-1 text-brand-danger">{friendlyError(compareError)}</p>}
           </div>
 
           {calculated && calculated.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-[11px]">
-                <thead><tr style={{ backgroundColor: "#FBF7EE" }}>
+                <thead><tr style={{ backgroundColor: "rgba(255,255,255,0.03)" }}>
                   {["Concept", "Items", "Area m2", "Construction", "Prelims", "OH&P", "Cont.", "Infl.", `CAPEX ${currency}`, "vs cap"].map((h) => (
                     <th key={h} className="text-left px-2 py-1.5 font-semibold">{h}</th>))}
                 </tr></thead>
@@ -1105,7 +1115,7 @@ export default function BudgetTracker() {
                       <td className="px-2 py-1.5 font-mono">{formatNumber(c.contingency)}</td>
                       <td className="px-2 py-1.5 font-mono">{formatNumber(c.inflation)}</td>
                       <td className="px-2 py-1.5 font-mono font-bold">{formatNumber(c.estimated_capex)}</td>
-                      <td className="px-2 py-1.5" style={{ color: c.within_budget === false ? "#B84C3D" : "#3D7A5C" }}>
+                      <td className="px-2 py-1.5" style={{ color: c.within_budget === false ? "#FF7A66" : "#4DD091" }}>
                         {c.within_budget === null ? "-" : c.within_budget ? "within" : "over"}
                       </td>
                     </tr>))}
@@ -1123,7 +1133,7 @@ export default function BudgetTracker() {
               : "One concept detected, so this section stays empty. Paste or upload a report containing several concepts to compare them."}
           </p>
           {compareWarning && (
-            <div className="rounded-md border-2 p-3 mb-2" style={{ borderColor: "#B8863B", backgroundColor: "#FBF1E1" }}>
+            <div className="rounded-md border-2 p-3 mb-2" style={{ borderColor: "#FFB454", backgroundColor: "rgba(255,255,255,0.03)" }}>
               <p className="text-[11px] text-brand-text"><strong>Incomplete comparison.</strong> {compareWarning}</p>
             </div>
           )}
@@ -1193,12 +1203,12 @@ export default function BudgetTracker() {
                     <td className="py-2 pr-2 font-semibold">{c.name}</td>
                     <td className="py-2 pr-2 font-mono">{formatNumber(c.estimated_capex)} {currency}</td>
                     <td className="py-2 pr-2">{c.largest_cost_driver} {c.driver_share_pct ? `(${c.driver_share_pct}%)` : ""}</td>
-                    <td className="py-2 pr-2" style={{ color: c.within_budget ? "#3D7A5C" : "#B84C3D" }}>{c.within_budget ? "Yes" : "No"}</td>
-                    <td className="py-2" style={{ color: CONFIDENCE_COLOR[c.confidence] || "#5A5445" }}>{c.confidence}</td>
+                    <td className="py-2 pr-2" style={{ color: c.within_budget ? "#4DD091" : "#FF7A66" }}>{c.within_budget ? "Yes" : "No"}</td>
+                    <td className="py-2" style={{ color: CONFIDENCE_COLOR[c.confidence] || "#C3D2E4" }}>{c.confidence}</td>
                   </tr>))}
                 </tbody>
               </table>
-              <div className="rounded-lg border-2 p-3" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
+              <div className="rounded-lg border-2 p-3" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}>
                 <p className="text-sm text-brand-dark"><span className="font-bold">Best value: {comparison.recommended}</span></p>
                 <p className="text-xs text-brand-dark mt-1">{comparison.recommendation_reason}</p>
                 {(comparison.feasibility_notes || []).length > 0 && (
@@ -1206,7 +1216,7 @@ export default function BudgetTracker() {
                     {comparison.feasibility_notes.map((f, i) => (
                       <p key={i} className="text-[11px]">
                         <span className="font-semibold">{f.concept}:</span>{" "}
-                        <span style={{ color: f.verdict === "Deliverable" ? "#3D7A5C" : f.verdict === "Not deliverable within budget" ? "#B84C3D" : "#B8863B" }}>{f.verdict}</span>
+                        <span style={{ color: f.verdict === "Deliverable" ? "#4DD091" : f.verdict === "Not deliverable within budget" ? "#FF7A66" : "#FFB454" }}>{f.verdict}</span>
                         {" - "}{f.reason}
                       </p>
                     ))}
@@ -1268,7 +1278,7 @@ export default function BudgetTracker() {
       </div>
 
       {insight?.conclusion && (
-        <div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
+        <div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}>
           <h3 className="font-bold text-sm uppercase tracking-wide text-brand-warning mb-2">Conclusion</h3>
           <p className="text-sm text-brand-dark leading-relaxed font-medium">{insight.conclusion}</p>
         </div>

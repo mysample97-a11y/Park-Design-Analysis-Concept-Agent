@@ -96,7 +96,7 @@ export default function TokenMeter({
           {onCalculate && (
             <button type="button" onClick={onCalculate} disabled={calculating}
               style={{ marginTop: 5, fontSize: 10.5, padding: "3px 8px", borderRadius: 5,
-                border: `1px solid ${st.bd}`, background: "#FFFFFF", color: "#3C3C3C",
+                border: `1px solid ${st.bd}`, background: "#131C29", color: "#3C3C3C",
                 cursor: calculating ? "default" : "pointer" }}>
               {calculating ? "Counting…" : "Calculate exact tokens"}
             </button>

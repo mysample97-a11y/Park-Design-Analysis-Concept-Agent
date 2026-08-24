@@ -16,7 +16,7 @@ import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../u
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG, missingFields, missingFieldsNote} from "../utils/reportTemplate";
 
-const COLORS = ["#1C2333", "#C9A46A", "#3D7A5C", "#B8863B", "#8A6A3A", "#5A5445", "#7FBF9E", "#E08A6A"];
+const COLORS = ["#E8EFF7", "#FF8A3D", "#4DD091", "#FFB454", "#8A6A3A", "#C3D2E4", "#7FBF9E", "#E08A6A"];
 
 function detectDelimiter(line) {
   const commaCount = (line.match(/,/g) || []).length;
@@ -204,6 +204,8 @@ export default function SurveyAnalyzer() {
       free_text_questions: textColumns.map((c) => ({ question: c.header, responses: c.values.filter((v) => v.trim()) })),
     };
     try {
+      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
+                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
         provider, apiKey, maxTokens: 3500,
@@ -229,8 +231,6 @@ export default function SurveyAnalyzer() {
         // Tells the model what is already written (so it is not repeated) and what
         // still needs writing. On a first run `done` is empty and this behaves
         // exactly like a normal single-pass call.
-        const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-          done: chunkState.done, continuationSummary: chunkState.continuationSummary });
  const _merged = mergeChunk(chunkState, { sections: parsedAnalysis.sections || parsedAnalysis,
 
         completed: parsedAnalysis.completed, remaining: parsedAnalysis.remaining,
@@ -363,11 +363,11 @@ export default function SurveyAnalyzer() {
 
           <p className="text-xs text-brand-text/60 text-center pt-2 border-t border-[#F0EBDF]">- or, on desktop/browser -</p>
           <div className="flex flex-wrap gap-3">
-            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff" }}>
+            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#4DA3FF", color: "#EAF3FF", backgroundColor: "#131C29" }}>
               <Upload size={15} /> Upload CSV / Excel File
               <input type="file" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt" onChange={handleFileUpload} className="sr-only" />
             </label>
-            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#1C2333", color: "#1C2333", backgroundColor: "#fff", opacity: imageLoading ? 0.4 : 1, pointerEvents: imageLoading ? "none" : "auto" }}>
+            <label className="text-sm font-semibold border-2 px-4 py-2.5 rounded-md flex items-center gap-2 cursor-pointer" style={{ borderColor: "#4DA3FF", color: "#EAF3FF", backgroundColor: "#131C29", opacity: imageLoading ? 0.4 : 1, pointerEvents: imageLoading ? "none" : "auto" }}>
               <ImageIcon size={15} /> {imageLoading ? "Reading image..." : "Upload Image / Screenshot"}
               <input type="file" accept="image/*" onChange={handleImageUpload} className="sr-only" />
             </label>
@@ -407,7 +407,7 @@ export default function SurveyAnalyzer() {
               <h3 className="text-sm font-semibold mb-3">{c.header} <span className="text-[10px] font-normal text-brand-text/60 uppercase">({c.type})</span></h3>
               <ResponsiveContainer width="100%" height={Math.max(120, c.data.length * 32)}>
                 <BarChart data={c.data} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D5" horizontal={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#22304A" horizontal={false} />
                   <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
                   <Tooltip />
@@ -422,7 +422,7 @@ export default function SurveyAnalyzer() {
               <h3 className="text-sm font-semibold mb-3">Design themes <span className="text-[10px] font-normal text-brand-text/60 uppercase">(AI-clustered from responses)</span></h3>
               <ResponsiveContainer width="100%" height={Math.max(140, analysis.themes.length * 34)}>
                 <BarChart data={analysis.themes} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E8E2D5" horizontal={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#22304A" horizontal={false} />
                   <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="theme" tick={{ fontSize: 11 }} width={150} />
                   <Tooltip />
@@ -433,7 +433,7 @@ export default function SurveyAnalyzer() {
               </ResponsiveContainer>
               <div className="mt-3 space-y-2">
                 {analysis.themes.map((t, idx) => (
-                  <div key={idx} className="text-xs text-[#3A362C]">
+                  <div key={idx} className="text-xs text-[#E8EFF7]">
                     <p><span className="font-semibold">{t.theme}</span> ({t.count} responses): {t.design_response}</p>
                     {t.representative_quote && <p className="text-[11px] italic text-brand-text/70 pl-3">"{t.representative_quote}"</p>}
                   </div>
@@ -446,7 +446,7 @@ export default function SurveyAnalyzer() {
             <div className="bg-white rounded-lg border border-brand-border p-4">
               <h3 className="text-sm font-semibold mb-2">Demographic patterns</h3>
               {analysis.demographic_patterns.map((d, i) => (
-                <p key={i} className="text-xs text-[#3A362C]"><span className="font-semibold">{d.group}:</span> {d.distinct_need}</p>
+                <p key={i} className="text-xs text-[#E8EFF7]"><span className="font-semibold">{d.group}:</span> {d.distinct_need}</p>
               ))}
             </div>
           )}
@@ -455,7 +455,7 @@ export default function SurveyAnalyzer() {
             <div className="bg-white rounded-lg border border-brand-border p-4">
               <h3 className="text-sm font-semibold mb-2">Conflicting needs</h3>
               {analysis.conflicts.map((c, i) => (
-                <p key={i} className="text-xs text-[#3A362C]"><span className="font-semibold text-brand-danger">{c.tension}</span> - <span className="text-brand-success">{c.resolution}</span></p>
+                <p key={i} className="text-xs text-[#E8EFF7]"><span className="font-semibold text-brand-danger">{c.tension}</span> - <span className="text-brand-success">{c.resolution}</span></p>
               ))}
             </div>
           )}
@@ -465,13 +465,13 @@ export default function SurveyAnalyzer() {
             {analysisLoading && <p className="text-sm text-brand-text/60">Reading responses and clustering themes...</p>}
             {analysisError && (
               <div className="space-y-1.5">
-                <p className="text-sm text-[#3A362C] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(analysisError)}</p>
+                <p className="text-sm text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-brand-danger" /> {friendlyError(analysisError)}</p>
                 <p className="text-[10px] text-brand-text/60 font-mono pl-5">Technical detail: {analysisError}</p>
               </div>
             )}
             {analysis && (
               <>
-                <p className="text-sm text-[#3A362C] leading-relaxed">{analysis.overall_summary}</p>
+                <p className="text-sm text-[#E8EFF7] leading-relaxed">{analysis.overall_summary}</p>
                 {analysis.red_flags?.length > 0 && (
                   <div className="mt-3 space-y-1">{analysis.red_flags.map((f, i) => (<p key={i} className="text-xs text-brand-danger flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0" /> {f}</p>))}</div>
                 )}
@@ -481,9 +481,9 @@ export default function SurveyAnalyzer() {
           </div>
 
           {analysis?.conclusion && (
-            <div className="rounded-lg border-2 p-4" style={{ borderColor: "#C9A46A", backgroundColor: "#FBF1E1" }}>
-              <h2 className="font-bold text-sm uppercase tracking-wide text-[#8A6A3A] mb-2">Conclusion</h2>
-              <p className="text-sm text-[#3A362C] leading-relaxed font-medium">{analysis.conclusion}</p>
+            <div className="rounded-lg border-2 p-4" style={{ borderColor: "#FF8A3D", backgroundColor: "rgba(255,255,255,0.03)" }}>
+              <h2 className="font-bold text-sm uppercase tracking-wide text-[#FF8A3D] mb-2">Conclusion</h2>
+              <p className="text-sm text-[#E8EFF7] leading-relaxed font-medium">{analysis.conclusion}</p>
             </div>
           )}
 
