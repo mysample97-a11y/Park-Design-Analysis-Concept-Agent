@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, Plus, Trash2, Wind, AlertTriangle, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -9,6 +9,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -57,6 +58,27 @@ export default function WindAnalyzer() {
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
     } catch { setExactEstimate(null); } finally { setCounting(false); }
   }
+
+  // Publish this tool's estimator and reset to the rails. Registered on mount
+  // and refreshed whenever the estimate changes, so the Budget rail can offer
+  // "Calculate tokens" and show the result for the tool actually on screen.
+  useEffect(() => {
+    setActiveTool("WND", {
+      calculate: calculateTokens,
+      resetUsage: () => setTokenUsage(resetUsage("WND")),
+      estimate: exactEstimate,
+    });
+    return () => clearActiveTool("WND");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { setActiveEstimate("WND", exactEstimate); }, [exactEstimate]);
+  // Publish progress so the Budget/Usage rail can show an unfinished report -
+  // the rail is where a user is looking while a long run is in flight.
+  useEffect(() => {
+    setActivePartial("WND", chunkProgress.complete ? null : {
+      done: chunkProgress.doneLabels, remaining: chunkProgress.remainingLabels,
+    });
+  }, [chunkProgress.doneCount, chunkProgress.complete]);
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -299,6 +321,18 @@ export default function WindAnalyzer() {
       conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
       runLimitations: [],
       extraRefs: webSources,
+      // F3: report which research mode actually produced this run. Derived from
+      // the sources the provider returned, not assumed - a report that claims
+      // live research it did not do is worse than one that admits training data.
+      // Live research may surface material the fixed checklist does not cover.
+      // It is appended INSIDE section 6 as further numbered findings, so the
+      // twelve-block structure every deliverable cross-references is untouched.
+      extraFindings: (insight && Array.isArray(insight.extra_findings))
+        ? insight.extra_findings : [],
+      provenance: {
+        mode: (webSources && webSources.length) ? "web" : "training",
+        searchedAt: (webSources && webSources.length) ? new Date().toISOString().slice(0, 10) : null,
+      },
       overflow: overflowText,
     };
   }
@@ -321,14 +355,6 @@ export default function WindAnalyzer() {
       setPdfError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again.");
     }));
   }
-
-  // Pre-flight estimate is not yet wired for this tool.
-  // Passing null is deliberate: the meter then shows "-" and says the
-  // estimate is unavailable. A fabricated number here - which an earlier
-  // revision produced by misusing `arguments` inside an arrow IIFE - is
-  // worse than no number, because it looks authoritative and is not.
-  // Actual usage is still recorded exactly after every call.
-  const toolEstimate = null;
 
   return (
     <div className="space-y-6">
@@ -426,7 +452,7 @@ export default function WindAnalyzer() {
 
       <div className="card border-2">
         <div className="p-4">
-          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <div className="flex items-center mb-2 flex-wrap gap-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
             <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}

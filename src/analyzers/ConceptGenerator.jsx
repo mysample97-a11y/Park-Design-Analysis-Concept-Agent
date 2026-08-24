@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { setActiveTool, setActiveEstimate, clearActiveTool } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -58,9 +59,6 @@ export default function ConceptGenerator() {
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("CPT"));
-  // Pre-flight estimate not yet wired for this tool. null is deliberate:
-  // the meter shows "-" rather than a fabricated figure.
-  const toolEstimate = null;
   const noteUsage = (u) => setTokenUsage(recordUsage("CPT", u));
   /*
     NOTE: section-chunking (F13b) is deliberately NOT applied here.
@@ -89,6 +87,20 @@ export default function ConceptGenerator() {
         : { ...estimateRun({ userText: preview, maxTokens: 2500, calls: n }), exact: false });
     } catch { setExactEstimate(null); } finally { setCounting(false); }
   }
+
+  // Publish this tool's estimator and reset to the rails. Registered on mount
+  // and refreshed whenever the estimate changes, so the Budget rail can offer
+  // "Calculate tokens" and show the result for the tool actually on screen.
+  useEffect(() => {
+    setActiveTool("CPT", {
+      calculate: calculateTokens,
+      resetUsage: () => setTokenUsage(resetUsage("CPT")),
+      estimate: exactEstimate,
+    });
+    return () => clearActiveTool("CPT");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { setActiveEstimate("CPT", exactEstimate); }, [exactEstimate]);
   // File ingestion. This tool previously accepted pasted text ONLY, so a user had to
   // open an exported report, select all, copy and paste it in by hand - for every run.
   const [briefFileNote, setBriefFileNote] = useState("");
@@ -401,6 +413,20 @@ export default function ConceptGenerator() {
         : [],
       runLimitations: [],
       extraRefs: webSources,
+      // F3: report which research mode actually produced this run. Derived from
+      // the sources the provider returned, not assumed - a report that claims
+      // live research it did not do is worse than one that admits training data.
+      // Live research may surface material the fixed checklist does not cover.
+      // It is appended INSIDE section 6 as further numbered findings, so the
+      // twelve-block structure every deliverable cross-references is untouched.
+      // No extra findings here. This tool's output is an ARRAY of concepts, not a
+      // single analysis object, so there is no top-level place for retrieved
+      // extras to attach. Left explicit rather than as a line that could never fire.
+      extraFindings: [],
+      provenance: {
+        mode: (webSources && webSources.length) ? "web" : "training",
+        searchedAt: (webSources && webSources.length) ? new Date().toISOString().slice(0, 10) : null,
+      },
       overflow: overflowText,
     };
   }
@@ -541,7 +567,7 @@ export default function ConceptGenerator() {
           ))}
 
           <div className="card p-4">
-            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <div className="flex items-center mb-2 flex-wrap gap-4">
               <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text">Recommendation</h3>
               <button onClick={generateRecommendation} disabled={recLoading || !apiKey} className="btn-dark"><Sparkles size={15} /> {recLoading ? "Analyzing..." : "Recommend Best Concept"}</button>
             </div>

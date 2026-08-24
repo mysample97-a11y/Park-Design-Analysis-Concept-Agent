@@ -172,6 +172,13 @@ export const TIER_REFERENCE = {
 };
 
 /**
+ * SUPERSEDED by capacityCheck(), which the rails use.
+ *
+ * This judged a run on token volume alone. capacityCheck() checks REQUESTS
+ * first, which is the dimension that actually throttles this app - a token-only
+ * verdict showed comfortable headroom right up to the moment the user was
+ * rate-limited. Kept only as the fallback for a caller with no declared limits.
+ *
  * Turns an estimate plus recorded usage into a short human verdict.
  * Deliberately qualitative: a precise percentage would imply a precision that
  * neither the estimate nor the tier information supports.
@@ -213,7 +220,8 @@ export default {
  * --------------------------------
  * The first version of this module counted tokens only. That was the wrong
  * measurement. Gemini's free tier allows 250,000-1,000,000 tokens per minute
- * but only ~15 requests per minute and ~1,500 per day; Anthropic likewise
+ * but only ~20 requests per minute and ~200 per day on the model observed here (the figure is
+ * per-model and Google revises it); Anthropic likewise
  * enforces RPM alongside ITPM/OTPM. A run that dies partway is therefore far
  * more likely to have exhausted REQUESTS than tokens - so a token-only meter
  * shows comfortable headroom right up to the moment the user is throttled.

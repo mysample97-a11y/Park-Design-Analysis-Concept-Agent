@@ -82,6 +82,25 @@ function emitUsage(onUsage, data, { content, systemInstruction, text, provider }
 const RETRY_STATUSES = [529, 500, 502, 503, 504];
 const MAX_ATTEMPTS = 3;
 
+/*
+ * PER-STATUS RETRY POLICY
+ *
+ * 503 from Gemini means the model has no capacity right now. It is not a
+ * momentary blip, and hammering it does not improve the odds - it just spends
+ * requests. Each attempt is counted by the provider, so three attempts turn one
+ * click into three units of the scarcest resource on a free key, during exactly
+ * the outage you are trying to survive.
+ *
+ * 503/529 therefore get ONE extra attempt after a long wait. 500/502/504 are
+ * genuine transients and keep the shorter escalating backoff.
+ */
+const CAPACITY_STATUSES = [503, 529];
+function policyFor(status) {
+  return CAPACITY_STATUSES.includes(status)
+    ? { maxAttempts: 2, baseDelay: 6000 }
+    : { maxAttempts: MAX_ATTEMPTS, baseDelay: 1000 };
+}
+
 /**
  * How many attempts are safe given what is left in the request budget.
  *
@@ -134,7 +153,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export async function withRetry(makeRequest, onAttempt, provider) {
   let last = null;
-  const maxAttempts = attemptsAllowed(provider);
+  const budgetCap = attemptsAllowed(provider);
+  let maxAttempts = budgetCap;
+  let baseDelay = 1000;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Every attempt is a real HTTP request and the provider counts it against
     // the rate limit whether it succeeds or not. Count it here, before we know
@@ -143,8 +164,24 @@ export async function withRetry(makeRequest, onAttempt, provider) {
     const response = await makeRequest();
     if (response.ok || !RETRY_STATUSES.includes(response.status)) return response;
     last = response;
+    // Narrow the policy once we know WHY it failed. Capacity refusals get one
+    // slow retry; the request budget still caps it.
+    const pol = policyFor(response.status);
+    maxAttempts = Math.min(budgetCap, pol.maxAttempts);
+    baseDelay = pol.baseDelay;
     if (attempt < maxAttempts - 1) {
-      const wait = backoffDelay(attempt);
+      // Honour the provider's own figure when it gives one - Gemini embeds it in
+      // the message ("Please retry in 35.86s") and both providers may send a
+      // Retry-After header. Guessing when we have been told is strictly worse.
+      // Read the body as TEXT from a clone, so the caller's json() still works.
+      let advised = null;
+      try {
+        const peek = await response.clone().text();
+        advised = retryAfterSeconds(response, peek);
+      } catch { advised = retryAfterSeconds(response, ""); }
+      const wait = advised != null
+        ? Math.min(advised * 1000, 60000)          // cap: never stall a UI past a minute
+        : Math.round(baseDelay * Math.pow(2, attempt) + Math.random() * 400);
       if (typeof onAttempt === "function") {
         onAttempt({ attempt: attempt + 1, of: maxAttempts, status: response.status, waitMs: wait });
       }
@@ -164,10 +201,17 @@ export function attributeError(provider, message, model) {
 }
 
 export function transientMessage(status) {
-  if (status === 529) {
-    return "The AI provider is temporarily overloaded (HTTP 529). This is a problem at their end, " +
-           "not with your API key, your quota or your input. It was retried automatically and still " +
-           "did not clear - waiting a minute and trying again usually works.";
+  if (status === 503 || status === 529) {
+    return `The model has no spare capacity right now (HTTP ${status}). This is at the provider's ` +
+           "end - not your key, your quota or your input, and NOT something a continuation can fix: " +
+           "the model refused before generating anything.\n\n" +
+           "What actually helps:\n" +
+           "1. Switch to a PINNED model in Settings. An alias such as 'gemini-flash-latest' can " +
+           "resolve to preview capacity, which is where most 503s come from. 'gemini-2.5-flash' is " +
+           "the stable choice.\n" +
+           "2. Wait a minute or two. Retrying immediately spends a request without improving the odds - " +
+           "every attempt counts against your per-minute limit.\n" +
+           "3. Try a Claude key if you have one; the two providers do not share capacity.";
   }
   if (status >= 500) {
     return `The AI provider returned a server error (HTTP ${status}) and did not recover after retries. ` +

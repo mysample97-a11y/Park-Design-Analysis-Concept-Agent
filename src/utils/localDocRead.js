@@ -216,6 +216,13 @@ export async function ocrPagesLocally(pageImages, onProgress) {
 }
 
 /**
+ * REFERENCE ONLY - not on the live path.
+ *
+ * The ladder is implemented inline in readExport.js, where the rasterised pages
+ * are already available. This function documents the same policy in one place
+ * and is kept for that reason; it is not called at runtime. If the policy
+ * changes, change readExport.js and update this to match.
+ *
  * Decides which rung to use, and what to tell the user.
  * Never triggers the AI path itself - it returns a RECOMMENDATION, and the
  * component asks for consent before spending anything.

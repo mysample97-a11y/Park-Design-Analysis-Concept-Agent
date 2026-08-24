@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect} from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -92,6 +93,27 @@ export default function SiteContextAnalyzer() {
         : { ...estimateRun({ userText: preview, maxTokens: 2500, calls: 1 }), exact: false });
     } catch { setExactEstimate(null); } finally { setCounting(false); }
   }
+
+  // Publish this tool's estimator and reset to the rails. Registered on mount
+  // and refreshed whenever the estimate changes, so the Budget rail can offer
+  // "Calculate tokens" and show the result for the tool actually on screen.
+  useEffect(() => {
+    setActiveTool("SCX", {
+      calculate: calculateTokens,
+      resetUsage: () => setTokenUsage(resetUsage("SCX")),
+      estimate: exactEstimate,
+    });
+    return () => clearActiveTool("SCX");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { setActiveEstimate("SCX", exactEstimate); }, [exactEstimate]);
+  // Publish progress so the Budget/Usage rail can show an unfinished report -
+  // the rail is where a user is looking while a long run is in flight.
+  useEffect(() => {
+    setActivePartial("SCX", chunkProgress.complete ? null : {
+      done: chunkProgress.doneLabels, remaining: chunkProgress.remainingLabels,
+    });
+  }, [chunkProgress.doneCount, chunkProgress.complete]);
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -369,6 +391,18 @@ export default function SiteContextAnalyzer() {
       conclusions: [...keyFindings(), ...forwardConstraints()].filter(Boolean),
       runLimitations: [],
       extraRefs: webSources,
+      // F3: report which research mode actually produced this run. Derived from
+      // the sources the provider returned, not assumed - a report that claims
+      // live research it did not do is worse than one that admits training data.
+      // Live research may surface material the fixed checklist does not cover.
+      // It is appended INSIDE section 6 as further numbered findings, so the
+      // twelve-block structure every deliverable cross-references is untouched.
+      extraFindings: (insight && Array.isArray(insight.extra_findings))
+        ? insight.extra_findings : [],
+      provenance: {
+        mode: (webSources && webSources.length) ? "web" : "training",
+        searchedAt: (webSources && webSources.length) ? new Date().toISOString().slice(0, 10) : null,
+      },
       overflow: overflowText,
     };
   }
@@ -456,14 +490,6 @@ export default function SiteContextAnalyzer() {
   }
 
   const STATUS_ICON = { pass: <CheckCircle2 size={14} className="text-[#3D7A5C]" />, review: <AlertTriangle size={14} className="text-[#B8863B]" />, pending: <XCircle size={14} className="text-[#8A8474]" /> };
-
-  // Pre-flight estimate is not yet wired for this tool.
-  // Passing null is deliberate: the meter then shows "-" and says the
-  // estimate is unavailable. A fabricated number here - which an earlier
-  // revision produced by misusing `arguments` inside an arrow IIFE - is
-  // worse than no number, because it looks authoritative and is not.
-  // Actual usage is still recorded exactly after every call.
-  const toolEstimate = null;
 
   return (
     <div className="min-h-screen bg-[#F7F5F1] text-[#1C2333] font-sans">
@@ -578,11 +604,24 @@ export default function SiteContextAnalyzer() {
         </div>
 
         <div className="bg-white rounded-lg border-2 border-[#E8E2D5] p-4">
-          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <div className="flex items-center mb-2 flex-wrap gap-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445]">Step 2 - AI Insight & Recommendation</h2>
-            <button onClick={generateInsight} disabled={insightLoading} style={BTN_DARK} className="text-sm font-bold px-4 py-2.5 rounded-md flex items-center gap-2 disabled:opacity-40 shadow-md">
+            <button onClick={generateInsight} disabled={insightLoading} title={chunkState.done.length && !insightComplete ? "Continue generating the remaining sections" : undefined} style={BTN_DARK} className="text-sm font-bold px-4 py-2.5 rounded-md flex items-center gap-2 disabled:opacity-40 shadow-md">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
+                <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
+                Still to generate: {chunkProgress.remainingLabels.join(", ")}.
+                <div className="text-brand-muted mt-1">Nothing already generated is lost. You may switch API key first, then press again to continue.</div>
+              </div>
+            )}
+            {chunkState.done.length > 0 && (
+              <button type="button" className="mt-2 text-xs underline text-brand-muted"
+                onClick={() => { clearPartial("SCX"); setChunkState(emptyState(INSIGHT_TOPICS)); setInsight(null); }}>
+                {insightComplete ? "Clear and start over" : "Discard partial insight and start over"}
+              </button>
+            )}
           </div>
           {insightLoading && <p className="text-sm text-[#8A8474]">Reviewing adjacency, capacity, and accessibility data...</p>}
           {insightError && (<div className="space-y-1"><p className="text-sm text-[#E8EFF7] flex items-start gap-1"><AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#B84C3D]" /> {friendlyError(insightError)}</p><p className="text-[10px] text-[#8A8474] font-mono pl-5">Technical: {insightError}</p></div>)}

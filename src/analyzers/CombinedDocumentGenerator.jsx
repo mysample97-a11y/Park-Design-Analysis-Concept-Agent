@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, AlertTriangle, Info, Layers, Copy, CheckCircle2, Upload, FileText } from "lucide-react";
 import * as XLSX from "xlsx";
 import * as mammoth from "mammoth";
@@ -8,6 +8,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -77,6 +78,27 @@ export default function CombinedDocumentGenerator() {
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
     } catch { setExactEstimate(null); } finally { setCounting(false); }
   }
+
+  // Publish this tool's estimator and reset to the rails. Registered on mount
+  // and refreshed whenever the estimate changes, so the Budget rail can offer
+  // "Calculate tokens" and show the result for the tool actually on screen.
+  useEffect(() => {
+    setActiveTool("CMB", {
+      calculate: calculateTokens,
+      resetUsage: () => setTokenUsage(resetUsage("CMB")),
+      estimate: exactEstimate,
+    });
+    return () => clearActiveTool("CMB");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { setActiveEstimate("CMB", exactEstimate); }, [exactEstimate]);
+  // Publish progress so the Budget/Usage rail can show an unfinished report -
+  // the rail is where a user is looking while a long run is in flight.
+  useEffect(() => {
+    setActivePartial("CMB", chunkProgress.complete ? null : {
+      done: chunkProgress.doneLabels, remaining: chunkProgress.remainingLabels,
+    });
+  }, [chunkProgress.doneCount, chunkProgress.complete]);
   const [fileLoading, setFileLoading] = useState({});
   const [fileErrors, setFileErrors] = useState({});
   const [pdfNotes, setPdfNotes] = useState({});
@@ -329,6 +351,19 @@ export default function CombinedDocumentGenerator() {
       conclusions: result ? (result.design_implications || []) : [],
       runLimitations: SECTIONS.filter((sec) => !inputs[sec.id]).map((sec) => `Section not supplied: ${sec.label} - its findings are absent from this synthesis.`),
       extraRefs: webSources,
+      // F3: report which research mode actually produced this run. Derived from
+      // the sources the provider returned, not assumed - a report that claims
+      // live research it did not do is worse than one that admits training data.
+      // Live research may surface material the fixed checklist does not cover.
+      // It is appended INSIDE section 6 as further numbered findings, so the
+      // twelve-block structure every deliverable cross-references is untouched.
+      // This tool stores its parsed output in `result`, not `insight`.
+      extraFindings: (result && Array.isArray(result.extra_findings))
+        ? result.extra_findings : [],
+      provenance: {
+        mode: (webSources && webSources.length) ? "web" : "training",
+        searchedAt: (webSources && webSources.length) ? new Date().toISOString().slice(0, 10) : null,
+      },
       overflow: overflowText,
     };
   }
@@ -348,14 +383,6 @@ export default function CombinedDocumentGenerator() {
       if (typeof setError === "function") setError("Your browser blocked the new tab needed for PDF export. Allow pop-ups and try again.");
     }));
   }
-
-  // Pre-flight estimate is not yet wired for this tool.
-  // Passing null is deliberate: the meter then shows "-" and says the
-  // estimate is unavailable. A fabricated number here - which an earlier
-  // revision produced by misusing `arguments` inside an arrow IIFE - is
-  // worse than no number, because it looks authoritative and is not.
-  // Actual usage is still recorded exactly after every call.
-  const toolEstimate = null;
 
   return (
     <div className="space-y-6">

@@ -383,6 +383,7 @@ export function buildStructuredReport({
   conclusions = [],      // generated
   runLimitations = [],   // run-specific, added to standing ones
   extraRefs = [],        // [{t,o,y,u}] any AI-cited sources
+  extraFindings = [],    // optional live-research findings, appended INSIDE [6]
   overflow = "",         // model-generated overflow appendix
   provenance = null,     // {mode:"web"|"training", searchedAt}
 }) {
@@ -453,6 +454,38 @@ export function buildStructuredReport({
       }
       L.push("");
     });
+    /*
+     * LIVE-RESEARCH ADDITIONS (optional).
+     *
+     * Where live web research surfaces something material that the fixed
+     * checklist does not cover - a local code requirement, a published
+     * site-specific constraint - it is appended here as further numbered
+     * findings, continuing the 6.n sequence.
+     *
+     * DELIBERATELY INSIDE SECTION 6. The twelve-block structure is the contract
+     * every deliverable cross-references, so nothing may add, remove or reorder
+     * a block. Extra material becomes another finding, never another section.
+     * Each one is marked so a reader can tell retrieved material from the
+     * standing methodology.
+     */
+    if (extraFindings.length) {
+      const base = findings.length;
+      extraFindings.forEach((f, xi) => {
+        L.push(`  6.${base + xi + 1}  ${String(f.title || "ADDITIONAL FINDING").toUpperCase()}`);
+        L.push("       [From live web research - see [11] for the source]");
+        if (f.text) {
+          sanitiseNarrative(String(f.text), stripped).split("\n").forEach((ln) => L.push(`       ${ln}`));
+        }
+        if (f.items && f.items.length) {
+          f.items.forEach((it) => L.push(`       - ${sanitiseNarrative(String(it), stripped)}`));
+        }
+        if (f.headers && f.rows) {
+          L.push("       " + f.headers.join(" | "));
+          f.rows.forEach((r) => L.push("       " + r.map((c) => String(c == null ? "" : c)).join(" | ")));
+        }
+        L.push("");
+      });
+    }
   } else L.push("  (no findings generated - run the analysis before exporting)");
   L.push("");
 
@@ -966,6 +999,7 @@ export function missingFieldsNote(missing = []) {
  *
  * Returns { data, truncated }.
  */
+/** REFERENCE ONLY - extractJSON in helpers.js is the parser actually used. */
 export function parseModelJSON(text) {
   const a = String(text || "").indexOf("{");
   if (a === -1) throw new Error("The AI's reply could not be read as structured data. Try again.");

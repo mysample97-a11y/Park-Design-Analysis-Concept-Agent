@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, BarChart3, AlertTriangle, Info, Upload, Image as ImageIcon, ChevronDown, ChevronRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useAppContext } from "../App";
@@ -11,6 +11,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -112,6 +113,27 @@ export default function SurveyAnalyzer() {
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
     } catch { setExactEstimate(null); } finally { setCounting(false); }
   }
+
+  // Publish this tool's estimator and reset to the rails. Registered on mount
+  // and refreshed whenever the estimate changes, so the Budget rail can offer
+  // "Calculate tokens" and show the result for the tool actually on screen.
+  useEffect(() => {
+    setActiveTool("SUR", {
+      calculate: calculateTokens,
+      resetUsage: () => setTokenUsage(resetUsage("SUR")),
+      estimate: exactEstimate,
+    });
+    return () => clearActiveTool("SUR");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { setActiveEstimate("SUR", exactEstimate); }, [exactEstimate]);
+  // Publish progress so the Budget/Usage rail can show an unfinished report -
+  // the rail is where a user is looking while a long run is in flight.
+  useEffect(() => {
+    setActivePartial("SUR", chunkProgress.complete ? null : {
+      done: chunkProgress.doneLabels, remaining: chunkProgress.remainingLabels,
+    });
+  }, [chunkProgress.doneCount, chunkProgress.complete]);
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
   // the previous code called a setError() never declared in this file, so the typeof
   // guard swallowed the message and the click appeared to do nothing at all.
@@ -308,6 +330,17 @@ export default function SurveyAnalyzer() {
       conclusions: [analysis?.conclusion].filter(Boolean),
       runLimitations: [],
       extraRefs: [],
+      // This tool does no live web research - it analyses the responses the user
+      // supplies. "training" is therefore correct and is stated explicitly rather
+      // than left to the default, so the report never implies research it did not do.
+      // Live research may surface material the fixed checklist does not cover.
+      // It is appended INSIDE section 6 as further numbered findings, so the
+      // twelve-block structure every deliverable cross-references is untouched.
+      // This tool stores its parsed output in `analysis` - it has no `insight`
+      // variable, and referencing one crashed the component on render.
+      extraFindings: (analysis && Array.isArray(analysis.extra_findings))
+        ? analysis.extra_findings : [],
+      provenance: { mode: "training", searchedAt: null },
       overflow: overflowText,
     };
   }
@@ -329,14 +362,6 @@ export default function SurveyAnalyzer() {
       setPdfError("Your browser blocked the new tab needed for PDF export. Allow pop-ups for this site and try again.");
     }));
   }
-
-  // Pre-flight estimate is not yet wired for this tool.
-  // Passing null is deliberate: the meter then shows "-" and says the
-  // estimate is unavailable. A fabricated number here - which an earlier
-  // revision produced by misusing `arguments` inside an arrow IIFE - is
-  // worse than no number, because it looks authoritative and is not.
-  // Actual usage is still recorded exactly after every call.
-  const toolEstimate = null;
 
   return (
     <div className="space-y-6">

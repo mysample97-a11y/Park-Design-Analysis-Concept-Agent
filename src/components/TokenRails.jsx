@@ -68,7 +68,8 @@ function Bar({ used, limit }) {
 }
 
 /** LEFT RAIL - what you may spend. */
-export function BudgetRail({ provider = "claude", estimate = null, onCalculate = null, calculating = false }) {
+export function BudgetRail({ provider = "claude", estimate = null, onCalculate = null,
+                             onClearEstimate = null, calculating = false }) {
   // Limits are declared HERE, not in Settings. They were in both places, which
   // meant two sources for one number - and the rail is where they are actually
   // consulted, so this is where they belong.
@@ -142,6 +143,19 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
             <div>Tokens / min <strong style={{ color: "#FFF" }}>{lim.tpm ? formatTokens(lim.tpm) : "none"}</strong></div>
           </div>
         </div>
+        {estimate && onClearEstimate && (
+          <button
+            type="button"
+            onClick={onClearEstimate}
+            style={{
+              marginTop: 5, width: "100%", padding: "4px 8px", fontSize: 10,
+              background: "transparent", color: "#93A6BC",
+              border: "1px solid #22304A", borderRadius: 5, cursor: "pointer",
+            }}
+          >
+            Clear estimate
+          </button>
+        )}
         {onCalculate && (
           <button
             type="button"
@@ -349,7 +363,8 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
  * Below 1280px the rails are hidden rather than squeezed - a cramped rail is
  * worse than none, and every tool still carries its own inline meter.
  */
-export default function TokenRails({ provider, usage, estimate, partial, onReset, onCalculate, calculating, children }) {
+export default function TokenRails({ provider, usage, estimate, partial, onReset,
+                                    onCalculate, onClearEstimate, calculating, children }) {
   // The rails are position:fixed in the page gutters, so they take NO width
   // from the centre column. An earlier revision used a 3-column grid and shrank
   // every tool - do not reintroduce that.
@@ -363,6 +378,7 @@ export default function TokenRails({ provider, usage, estimate, partial, onReset
           provider={provider}
           estimate={estimate}
           onCalculate={onCalculate}
+          onClearEstimate={onClearEstimate}
           calculating={calculating}
         />
         <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset} />

@@ -25,7 +25,10 @@ const DEFAULT_META = {
 // Sensible current defaults (editable in Settings if the provider renames them)
 const DEFAULT_MODELS = {
   claude: "claude-sonnet-4-6",
-  gemini: "gemini-flash-latest",
+  // PINNED, deliberately. "gemini-flash-latest" is an alias and can resolve to
+  // preview capacity, which is the most common source of repeated HTTP 503
+  // "model overloaded" failures. A pinned stable id is far more reliable.
+  gemini: "gemini-2.5-flash",
 };
 
 export function useApiKeys() {
@@ -45,7 +48,30 @@ export function useApiKeys() {
         claude: localStorage.getItem(MODEL_KEYS.claude) || DEFAULT_MODELS.claude,
         gemini: localStorage.getItem(MODEL_KEYS.gemini) || DEFAULT_MODELS.gemini,
       });
-      setGroundingState(localStorage.getItem(GROUND_KEY) === "1");
+      /*
+       * GROUNDING DEFAULT FOLLOWS THE DECLARED TIER.
+       *
+       * Live research is the better answer whenever it is affordable: the user
+       * supplies only a location and a few details, so retrieved sources beat
+       * training recall. Training knowledge exists so the tool WORKS for
+       * everyone, not because it is preferable.
+       *
+       * On a FREE Gemini key a grounded request is charged against a very small
+       * daily allowance, so defaulting it on would exhaust the key in a couple of
+       * analyses - hence off by default there.
+       * On a PAID key that constraint does not apply, so grounding defaults ON.
+       *
+       * An explicit user choice always wins: the stored value is only absent on
+       * first use, which is the only time the default is consulted.
+       */
+      const storedGround = localStorage.getItem(GROUND_KEY);
+      if (storedGround === "1" || storedGround === "0") {
+        setGroundingState(storedGround === "1");
+      } else {
+        let paid = false;
+        try { paid = getLimits("gemini").tier === "paid"; } catch { paid = false; }
+        setGroundingState(paid);
+      }
       const rawMeta = localStorage.getItem(META_KEY);
       if (rawMeta) setMeta({ ...DEFAULT_META, ...JSON.parse(rawMeta) });
     } catch {
@@ -77,7 +103,10 @@ export function useApiKeys() {
 
   const saveGrounding = (on) => {
     setGroundingState(on);
-    try { if (on) localStorage.setItem(GROUND_KEY, "1"); else localStorage.removeItem(GROUND_KEY); } catch { /* ignore */ }
+    // Store "0" rather than deleting the key. Deleting it means "no choice made",
+    // which sends the loader back to the tier default - so a paid user who
+    // deliberately turned grounding OFF would find it back ON after a reload.
+    try { localStorage.setItem(GROUND_KEY, on ? "1" : "0"); } catch { /* ignore */ }
   };
 
   const saveMeta = (patch) => {

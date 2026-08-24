@@ -46,6 +46,17 @@ function stripSecrets(obj, path = "") {
 }
 
 /**
+ * SUPERSEDED - not on the live path.
+ *
+ * These three (buildSession / saveSessionToFile / loadSessionFromFile) take a
+ * state object the caller supplies. The UI uses the APP-LEVEL pair further down
+ * (exportAppSession / saveAppSessionToFile / loadAppSessionFromFile), which works
+ * at the storage layer and needs no cooperation from each tool.
+ *
+ * Kept because a per-tool save is the natural next step if tools ever lift their
+ * form state into a serialisable shape. Do not wire these expecting whole-app
+ * behaviour - they only carry what you hand them.
+ *
  * Builds the session object.
  * @param {string} toolCode  e.g. "SOL"
  * @param {object} state     whatever the tool wants to restore

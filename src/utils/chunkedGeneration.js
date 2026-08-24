@@ -77,6 +77,14 @@ export function buildChunkedPrompt({ topics, done = [], continuationSummary = ""
   p += '  "continuation_summary": "<2-3 sentences summarising what you wrote, so a\n';
   p += '     later call can continue coherently without repeating it>"\n';
   p += '}\n';
+  p += "\nOPTIONAL - only when live web research returned something material that the\n";
+  p += "sections above do not already cover (a local code requirement, a published\n";
+  p += "site-specific constraint), you may also return:\n";
+  p += '  "extra_findings": [{ "title": "", "text": "", "items": [] }]\n';
+  p += "Rules for it: each entry must be additive, not a restatement; it must come from\n";
+  p += "a source you actually retrieved and can cite; and it must NOT duplicate or\n";
+  p += "replace any section listed above. Omit the field entirely if you have nothing\n";
+  p += "retrieved to add - an empty or speculative entry is worse than none.\n";
   p += "\nPut 'completed', 'remaining' and 'continuation_summary' FIRST in the JSON object.\n";
   p += "If output is cut short, those fields must already have been emitted - they are\n";
   p += "what makes resuming possible.\n";
@@ -136,7 +144,18 @@ export function mergeChunk(state, reply, topics) {
   return next;
 }
 
-/** I4: assemble in declared topic order, never generation order. */
+/**
+ * I4: assemble in declared topic order, never generation order.
+ *
+ * NOT on the live path in this app, and that is fine: every tool reads the
+ * merged sections BY KEY (insight.conclusion, insight.zone_recommendations),
+ * never by iterating the object - so display order cannot depend on the order
+ * the model happened to produce them in. I4 holds by construction.
+ *
+ * Kept for any consumer that DOES need to iterate sections in a fixed order,
+ * such as rendering an arbitrary topic list without knowing the keys ahead of
+ * time. If a tool ever starts iterating, use this rather than Object.keys().
+ */
 export function assembleSections(state, topics) {
   return topics
     .filter((t) => (state.sections[t.key] || "").trim())

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
@@ -7,6 +7,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -110,6 +111,27 @@ export default function BudgetTracker() {
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
     } catch { setExactEstimate(null); } finally { setCounting(false); }
   }
+
+  // Publish this tool's estimator and reset to the rails. Registered on mount
+  // and refreshed whenever the estimate changes, so the Budget rail can offer
+  // "Calculate tokens" and show the result for the tool actually on screen.
+  useEffect(() => {
+    setActiveTool("BDG", {
+      calculate: calculateTokens,
+      resetUsage: () => setTokenUsage(resetUsage("BDG")),
+      estimate: exactEstimate,
+    });
+    return () => clearActiveTool("BDG");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { setActiveEstimate("BDG", exactEstimate); }, [exactEstimate]);
+  // Publish progress so the Budget/Usage rail can show an unfinished report -
+  // the rail is where a user is looking while a long run is in flight.
+  useEffect(() => {
+    setActivePartial("BDG", chunkProgress.complete ? null : {
+      done: chunkProgress.doneLabels, remaining: chunkProgress.remainingLabels,
+    });
+  }, [chunkProgress.doneCount, chunkProgress.complete]);
 
   function addFacility() { setFacilities([...facilities, { id: uid(), name: "", area: "", rate: "" }]); }
   function updateFacility(id, patch) { setFacilities(facilities.map((f) => (f.id === id ? { ...f, ...patch } : f))); }
@@ -888,6 +910,18 @@ export default function BudgetTracker() {
       conclusions: (insight?.observations || []),
       runLimitations: [],
       extraRefs: webSources,
+      // F3: report which research mode actually produced this run. Derived from
+      // the sources the provider returned, not assumed - a report that claims
+      // live research it did not do is worse than one that admits training data.
+      // Live research may surface material the fixed checklist does not cover.
+      // It is appended INSIDE section 6 as further numbered findings, so the
+      // twelve-block structure every deliverable cross-references is untouched.
+      extraFindings: (insight && Array.isArray(insight.extra_findings))
+        ? insight.extra_findings : [],
+      provenance: {
+        mode: (webSources && webSources.length) ? "web" : "training",
+        searchedAt: (webSources && webSources.length) ? new Date().toISOString().slice(0, 10) : null,
+      },
       overflow: overflowText,
     };
   }
@@ -1243,7 +1277,7 @@ export default function BudgetTracker() {
       </div>
 
       <div className="card p-4">
-        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div className="flex items-center mb-2 flex-wrap gap-4">
           <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h3>
           <button onClick={generateInsight} disabled={insightLoading || comparing || !apiKey}
             className="btn-dark disabled:opacity-60 disabled:cursor-not-allowed">

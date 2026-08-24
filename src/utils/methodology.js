@@ -15,6 +15,13 @@
 // Sending the reference documents themselves is not viable: they run to megabytes,
 // far beyond any practical prompt budget. Distilling them to scope is what makes this work.
 
+/**
+ * REFERENCE ONLY - nothing consumes this at runtime.
+ * Standing references reaching the report come from TOOL_SPECS.refs in
+ * reportTemplate.js. This list is retained as documentation of the wider
+ * methodology base; if it is ever wired in, note that naming a body here does
+ * NOT make it govern at the project location (see JURISDICTION_RULE).
+ */
 export const REFERENCE_LIBRARY = [
   { id: "arcon", title: "Comprehensive Guide to Site Analysis", org: "Architects Registration Council of Nigeria (ARCON)",
     covers: "Site analysis scope: physical, environmental, regulatory, hazard and contextual factors" },

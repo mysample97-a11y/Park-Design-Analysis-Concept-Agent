@@ -71,8 +71,7 @@ export async function fileToBase64Raw(file) {
 export function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
 }
-export const generateUid = uid;
-export const getUid = uid;
+// NOTE: generateUid / getUid aliases removed - nothing referenced them.
 
 /** User-Friendly Error Formatter */
 export function friendlyError(err) {
@@ -87,7 +86,10 @@ export function friendlyError(err) {
         out += "You have Gemini live web search switched on in Settings - on a free Gemini key that is charged against a very small daily allowance (roughly 20 requests) and is the most likely cause. Turn it off in Settings and try again. ";
       }
     } catch { /* ignore */ }
-    out += "Otherwise: free tiers reset after a period, so wait a few minutes and retry, or use a key with remaining quota. Gemini free tier is roughly 10 requests per minute and 1,500 per day.";
+    out += "Otherwise: free tiers reset on a rolling window, so wait a minute and retry, or use a key " +
+           "with remaining quota. Free-tier request limits are PER MODEL and Google changes them without " +
+           "notice - read the exact ceiling from the error text above (it names the metric and the limit) " +
+           "and set it in the Budget rail so the meter warns you next time.";
     return out;
   }
   if (msg.includes("401") || msg.includes("403") || msg.includes("key invalid") || msg.includes("api key error")) return "API key problem - the key was rejected. Check it is correct and still active in Settings.";

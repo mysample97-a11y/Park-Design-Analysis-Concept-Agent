@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import { getUsage } from "./utils/tokenMeter";
+import { subscribeActiveTool, setActiveEstimate } from "./utils/toolBridge";
 import { Home, MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
 import Landing from "./components/Landing";
 import TokenRails from "./components/TokenRails";
@@ -76,6 +77,12 @@ export default function App() {
   // Live usage for the rail. Polled rather than lifted through context so no
   // tool has to be rewired; the store is localStorage and reads are cheap.
   const [railUsage, setRailUsage] = useState(() => getUsage("SCX"));
+  // The visible tool publishes its estimator and reset here. Previously the
+  // rails were passed estimate={null} and onReset={null}, so the Calculate
+  // and Reset buttons had nothing to call and never rendered at all.
+  const [activeTool, setActiveToolState] = useState({ code: null, calculate: null, resetUsage: null, estimate: null });
+  useEffect(() => subscribeActiveTool(setActiveToolState), []);
+  const [counting, setCounting] = useState(false);
   useEffect(() => {
     const code = TAB_TOOL_CODE[activeTab];
     if (!code) return undefined;
@@ -325,9 +332,19 @@ export default function App() {
           <TokenRails
             provider={provider}
             usage={railUsage}
-            estimate={null}
-            partial={null}
-            onReset={null}
+            estimate={activeTool.estimate}
+            partial={activeTool.partial}
+            calculating={counting}
+            onCalculate={activeTool.calculate ? async () => {
+              setCounting(true);
+              try { await activeTool.calculate(); } finally { setCounting(false); }
+            } : null}
+            onClearEstimate={activeTool.code ? () => setActiveEstimate(activeTool.code, null) : null}
+            onReset={activeTool.resetUsage ? () => {
+              activeTool.resetUsage();
+              const code = TAB_TOOL_CODE[activeTab];
+              if (code) setRailUsage(getUsage(code));
+            } : null}
           >
             {TOOL_PANELS.map(({ id, Component }) =>
               visitedTabs.has(id) ? (

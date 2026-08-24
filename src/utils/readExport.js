@@ -75,17 +75,68 @@ export async function readExportFile(file, onProgress, onRasterize) {
 
   if (ext === ".pdf") {
     const res = await extractPdfText(file, onProgress);
-    if (!res.empty) return finalise({ text: res.text, kind: "pdf", note: res.note + " Read locally - no AI used." });
-    // No text layer: it is a scan or an image export. Rather than refusing, hand the
-    // caller rendered pages so it can read them with the model. Works on Claude and
-    // Gemini alike, since the AI router translates these blocks for both.
+
+    /* ------------------------------------------------------------------
+     * READING LADDER (F12) - cheapest rung that works, AI last.
+     *
+     *   1. pdf.js text layer      free, instant
+     *   2. SUFFICIENCY check      a PDF yielding 30 characters across 8 pages
+     *                             passes `!empty` but tells the analysis almost
+     *                             nothing. That silent near-miss is worse than
+     *                             no text at all, so it is caught here.
+     *   3. tesseract.js OCR       free, in-browser, no key, NO TOKENS and NO
+     *                             REQUEST - so it does not touch the rate limit
+     *                             that actually constrains this app
+     *   4. AI vision              costs tokens AND a request; only reached when
+     *                             the free rungs fail or OCR confidence is poor
+     * ---------------------------------------------------------------- */
+    const { assessTextSufficiency } = await import("./localDocRead");
+    const suff = assessTextSufficiency(res.text, res.pages);
+
+    if (!res.empty && suff.sufficient) {
+      return finalise({ text: res.text, kind: "pdf", note: res.note + " Read locally - no AI used." });
+    }
+
+    // Rung 3: free browser OCR before spending anything.
+    try {
+      const { ocrPagesLocally } = await import("./localDocRead");
+      const { blocks, pagesRendered, pagesTotal } = await rasterizePdf(file, 6, onProgress);
+      const dataUrls = (blocks || [])
+        .map((b) => (b?.source?.data ? `data:${b.source.media_type || "image/png"};base64,${b.source.data}` : null))
+        .filter(Boolean);
+      if (dataUrls.length) {
+        const ocr = await ocrPagesLocally(dataUrls, (p) => {
+          if (typeof onProgress === "function") {
+            onProgress(`Reading page ${p.page} of ${p.of} with in-browser OCR (free, no API call)...`);
+          }
+        });
+        if (ocr.reliable) {
+          return finalise({
+            text: ocr.text, kind: "pdf-ocr-local",
+            note: `${suff.level === "thin" ? "The text layer was too sparse to use, so " : "No text layer, so "}` +
+              `${pagesRendered} of ${pagesTotal} page${pagesTotal === 1 ? "" : "s"} were read by OCR in your browser. ` +
+              ocr.note + " No API call, no tokens and no request used. Check the result against the original.",
+          });
+        }
+        // Poor confidence: fall through to AI vision, saying why.
+        if (typeof onProgress === "function") {
+          onProgress(`In-browser OCR confidence was only ${ocr.confidence}% - falling back to AI vision.`);
+        }
+      }
+    } catch (e) {
+      if (typeof onProgress === "function") {
+        onProgress("In-browser OCR unavailable (" + (e?.message || "unknown") + ") - falling back to AI vision.");
+      }
+    }
+
+    // Rung 4: AI vision. Costs tokens and a request, so it is genuinely last.
     if (typeof onRasterize === "function") {
       const { blocks, pagesRendered, pagesTotal } = await rasterizePdf(file, 6, onProgress);
       const text = await onRasterize(blocks, { pagesRendered, pagesTotal });
       if (text && text.trim()) {
         return finalise({
           text: text.trim(), kind: "pdf-ocr",
-          note: `No text layer found, so ${pagesRendered} of ${pagesTotal} page${pagesTotal === 1 ? "" : "s"} were read as images by the AI. Check the result against the original.`,
+          note: `Free in-browser OCR could not read this reliably, so ${pagesRendered} of ${pagesTotal} page${pagesTotal === 1 ? "" : "s"} were read as images by the AI - this used tokens and a request. Check the result against the original.`,
         });
       }
     }
