@@ -9,7 +9,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -71,7 +71,15 @@ export default function WindAnalyzer() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      // Estimate from the tool's ACTUAL inputs, not from chunkState.sections -
+      // that is empty before a run, so the figure was a constant (~1 in, 1.4k out)
+      // regardless of what the user had typed.
+      const o = (() => { try { return structuredOpts(); } catch { return {}; } })();
+      const preview = JSON.stringify({
+        inputs: o.inputs || [],
+        findings: o.findings || [],
+        already: chunkState.sections || {},
+      }).slice(0, 60000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "analysis system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact
@@ -83,6 +91,44 @@ export default function WindAnalyzer() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("WND", {
+      snapshot: () => ({ location, SEASONS, researching, researchNote, zones, insight, overflowText, webSources, groundingNote, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.location !== undefined) setLocation(s.location);
+      if (s.SEASONS !== undefined) setSeasons(s.SEASONS);
+      if (s.researching !== undefined) setResearching(s.researching);
+      if (s.researchNote !== undefined) setResearchNote(s.researchNote);
+      if (s.zones !== undefined) setZones(s.zones);
+      if (s.insight !== undefined) setInsight(s.insight);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("WND");
+    if (waiting) {
+      if (waiting.location !== undefined) setLocation(waiting.location);
+      if (waiting.SEASONS !== undefined) setSeasons(waiting.SEASONS);
+      if (waiting.researching !== undefined) setResearching(waiting.researching);
+      if (waiting.researchNote !== undefined) setResearchNote(waiting.researchNote);
+      if (waiting.zones !== undefined) setZones(waiting.zones);
+      if (waiting.insight !== undefined) setInsight(waiting.insight);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("WND");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("WND", {
       calculate: calculateTokens,

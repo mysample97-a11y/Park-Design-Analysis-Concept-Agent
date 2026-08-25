@@ -143,7 +143,10 @@ function makeSignal(externalSignal, ms = REQUEST_TIMEOUT_MS) {
 
 /** Turns an abort into a message that says WHICH kind of stop it was. */
 export function abortMessage(err, externalSignal) {
-  const cancelled = externalSignal && externalSignal.aborted;
+  // A user cancel is identified by the caller's signal; anything else that got
+  // here is a timeout. Checking the message alone is unreliable because the
+  // reason is not preserved consistently across browsers.
+  const cancelled = !!(externalSignal && externalSignal.aborted);
   if (cancelled) return "Cancelled. Nothing already generated has been lost - press Continue to resume.";
   return `The request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s without a reply. ` +
          "The provider accepted the connection and then stopped responding - this is at their end, " +
@@ -498,7 +501,12 @@ export async function callAI(opts = {}) {
   try {
     return await callAIInner(opts);
   } catch (e) {
-    if (e && (e.name === "AbortError" || /abort/i.test(String(e.message)))) {
+    // Must also match "timeout" and "cancelled": makeSignal aborts with those
+    // reasons, and some browsers surface the REASON rather than an AbortError.
+    // Without them the user saw a bare "timeout" with no explanation - which is
+    // exactly the unhelpful message reported.
+    const m = String((e && e.message) || "");
+    if (e && (e.name === "AbortError" || /abort|timeout|cancell?ed/i.test(m))) {
       throw new Error(abortMessage(e, opts.abortSignal));
     }
     throw e;

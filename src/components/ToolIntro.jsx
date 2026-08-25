@@ -26,7 +26,7 @@ export default function ToolIntro({ toolCode }) {
         {open ? <ChevronDown size={15} className="text-brand-text" /> : <ChevronRight size={15} className="text-brand-text" />}
       </button>
       {open && (
-        <div className="px-4 pb-3 space-y-2 text-xs text-brand-text">
+        <div className="px-4 pt-3 pb-4 space-y-2 text-xs text-brand-text">
           <p><span className="font-semibold text-brand-dark">What it does:</span> {spec.covers}</p>
           <p><span className="font-semibold text-brand-dark">What to give it:</span> {spec.inputs}</p>
           {spec.needs && (

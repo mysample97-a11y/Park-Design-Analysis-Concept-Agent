@@ -581,3 +581,35 @@ input, textarea, select { color: #1C2333; }
   background-image: none !important;
   box-shadow: none !important;
 }
+
+/* ---------------------------------------------------------------------------
+   ICON-ONLY BUTTONS MUST NOT BE PAINTED AS PRIMARY ACTIONS
+
+   The element-wide neon rule turned every <button> into a filled blue box -
+   including delete controls that contain nothing but a 14px icon. Next to the
+   zone Area field that renders as a mysterious empty box with no label, which
+   is exactly what it looked like.
+
+   `data-plain` is applied in the JSX to icon-only buttons; these class-based
+   rules catch the rest.
+--------------------------------------------------------------------------- */
+.as2p-tools-theme button[data-plain],
+.as2p-tools-theme button[class*="hover:text-"],
+.as2p-tools-theme button[aria-label]:not([class*="btn-"]) {
+  background-image: none !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 2px !important;
+  color: #93A6BC !important;
+}
+.as2p-tools-theme button[data-plain]:hover,
+.as2p-tools-theme button[class*="hover:text-"]:hover {
+  color: #FF8A7A !important;
+  background-color: rgba(255,138,61,.10) !important;
+  border-radius: 5px;
+}
+
+/* Card headers sat flush against their first line of content. */
+.as2p-tools-theme .card-header { padding-bottom: 0.6rem !important; }
+.as2p-tools-theme .card-header + * { padding-top: 0.75rem !important; }

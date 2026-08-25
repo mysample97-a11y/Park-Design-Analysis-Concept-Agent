@@ -7,7 +7,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -124,7 +124,15 @@ export default function BudgetTracker() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      // Estimate from the tool's ACTUAL inputs, not from chunkState.sections -
+      // that is empty before a run, so the figure was a constant (~1 in, 1.4k out)
+      // regardless of what the user had typed.
+      const o = (() => { try { return structuredOpts(); } catch { return {}; } })();
+      const preview = JSON.stringify({
+        inputs: o.inputs || [],
+        findings: o.findings || [],
+        already: chunkState.sections || {},
+      }).slice(0, 60000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "analysis system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact
@@ -136,6 +144,60 @@ export default function BudgetTracker() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("BDG", {
+      snapshot: () => ({ facilities, rates, pasteText, location, currency, researching, researchNote, budgetCap, detecting, conceptCount, insight, comparison, comparing, calculated, overflowText, webSources, groundingNote, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.facilities !== undefined) setFacilities(s.facilities);
+      if (s.rates !== undefined) setRates(s.rates);
+      if (s.pasteText !== undefined) setPasteText(s.pasteText);
+      if (s.location !== undefined) setLocation(s.location);
+      if (s.currency !== undefined) setCurrency(s.currency);
+      if (s.researching !== undefined) setResearching(s.researching);
+      if (s.researchNote !== undefined) setResearchNote(s.researchNote);
+      if (s.budgetCap !== undefined) setBudgetCap(s.budgetCap);
+      if (s.detecting !== undefined) setDetecting(s.detecting);
+      if (s.conceptCount !== undefined) setConceptCount(s.conceptCount);
+      if (s.insight !== undefined) setInsight(s.insight);
+      if (s.comparison !== undefined) setComparison(s.comparison);
+      if (s.comparing !== undefined) setComparing(s.comparing);
+      if (s.calculated !== undefined) setCalculated(s.calculated);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("BDG");
+    if (waiting) {
+      if (waiting.facilities !== undefined) setFacilities(waiting.facilities);
+      if (waiting.rates !== undefined) setRates(waiting.rates);
+      if (waiting.pasteText !== undefined) setPasteText(waiting.pasteText);
+      if (waiting.location !== undefined) setLocation(waiting.location);
+      if (waiting.currency !== undefined) setCurrency(waiting.currency);
+      if (waiting.researching !== undefined) setResearching(waiting.researching);
+      if (waiting.researchNote !== undefined) setResearchNote(waiting.researchNote);
+      if (waiting.budgetCap !== undefined) setBudgetCap(waiting.budgetCap);
+      if (waiting.detecting !== undefined) setDetecting(waiting.detecting);
+      if (waiting.conceptCount !== undefined) setConceptCount(waiting.conceptCount);
+      if (waiting.insight !== undefined) setInsight(waiting.insight);
+      if (waiting.comparison !== undefined) setComparison(waiting.comparison);
+      if (waiting.comparing !== undefined) setComparing(waiting.comparing);
+      if (waiting.calculated !== undefined) setCalculated(waiting.calculated);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("BDG");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("BDG", {
       calculate: calculateTokens,

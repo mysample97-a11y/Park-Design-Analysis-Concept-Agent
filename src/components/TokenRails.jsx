@@ -35,6 +35,7 @@ import {
   getLiveLimits, resetRequests, PUBLISHED_LIMITS,
 } from "../utils/tokenMeter";
 import { saveAppSessionToFile, loadAppSessionFromFile } from "../utils/session";
+import { snapshotAllTools, restoreAllTools } from "../utils/toolBridge";
 
 const PANEL = {
   // Same visual language as the tool shell: dark surface, cool border, a faint
@@ -322,8 +323,13 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
           type="button"
           onClick={() => {
             try {
-              const r = saveAppSessionToFile();
-              setSessionNote(`Saved ${r.keys} item(s) to ${r.name}.`);
+              // Include every mounted tool's inputs. Without this the file held
+              // only counters and partial output, and loading it looked like a no-op.
+              const r = saveAppSessionToFile(snapshotAllTools());
+              setSessionNote(
+                `Saved to ${r.name} — ${r.tools} tool${r.tools === 1 ? "" : "s"} of inputs ` +
+                `and ${r.keys} stored item${r.keys === 1 ? "" : "s"}. Tools you have not opened ` +
+                `this session are not included.`);
             } catch (e) { setSessionNote("Could not save: " + (e.message || "unknown error")); }
           }}
           style={{ width: "100%", marginTop: 5, padding: "5px 8px", fontSize: 10.5,
@@ -346,7 +352,17 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
               if (!f) return;
               try {
                 const r = await loadAppSessionFromFile(f);
-                setSessionNote(r.note);
+                // Push inputs straight back into the tools. Any tool not yet
+                // opened has its state held and applied when it mounts.
+                const applied = restoreAllTools(r.toolState || {});
+                setSessionNote(
+                  `${r.note} Restored inputs for ${applied.applied.length} open tool` +
+                  `${applied.applied.length === 1 ? "" : "s"}` +
+                  (applied.deferred.length
+                    ? `; ${applied.deferred.join(", ")} will fill in when you open ` +
+                      `${applied.deferred.length === 1 ? "it" : "them"}.`
+                    : ".") +
+                  " Counters and partial AI output need a page reload to show.");
               } catch (err) { setSessionNote(err.message || "Could not load that file."); }
             }}
           />

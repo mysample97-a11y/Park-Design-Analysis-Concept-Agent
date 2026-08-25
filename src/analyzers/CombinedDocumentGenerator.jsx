@@ -8,7 +8,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -91,7 +91,15 @@ export default function CombinedDocumentGenerator() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      // Estimate from the tool's ACTUAL inputs, not from chunkState.sections -
+      // that is empty before a run, so the figure was a constant (~1 in, 1.4k out)
+      // regardless of what the user had typed.
+      const o = (() => { try { return structuredOpts(); } catch { return {}; } })();
+      const preview = JSON.stringify({
+        inputs: o.inputs || [],
+        findings: o.findings || [],
+        already: chunkState.sections || {},
+      }).slice(0, 60000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "analysis system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact
@@ -103,6 +111,44 @@ export default function CombinedDocumentGenerator() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("CMB", {
+      snapshot: () => ({ inputs, pdfNotes, result, copied, projectLocation, gapCheck, overflowText, webSources, groundingNote, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.inputs !== undefined) setInputs(s.inputs);
+      if (s.pdfNotes !== undefined) setPdfNotes(s.pdfNotes);
+      if (s.result !== undefined) setResult(s.result);
+      if (s.copied !== undefined) setCopied(s.copied);
+      if (s.projectLocation !== undefined) setProjectLocation(s.projectLocation);
+      if (s.gapCheck !== undefined) setGapCheck(s.gapCheck);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("CMB");
+    if (waiting) {
+      if (waiting.inputs !== undefined) setInputs(waiting.inputs);
+      if (waiting.pdfNotes !== undefined) setPdfNotes(waiting.pdfNotes);
+      if (waiting.result !== undefined) setResult(waiting.result);
+      if (waiting.copied !== undefined) setCopied(waiting.copied);
+      if (waiting.projectLocation !== undefined) setProjectLocation(waiting.projectLocation);
+      if (waiting.gapCheck !== undefined) setGapCheck(waiting.gapCheck);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("CMB");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("CMB", {
       calculate: calculateTokens,

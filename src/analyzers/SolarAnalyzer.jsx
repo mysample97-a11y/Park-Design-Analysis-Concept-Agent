@@ -10,7 +10,7 @@ import {
   isComplete, progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -190,6 +190,44 @@ export default function SolarAnalyzer() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("SOL", {
+      snapshot: () => ({ location, siteInfo, preset, zones, insight, autoNote, overflowText, webSources, groundingNote, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.location !== undefined) setLocation(s.location);
+      if (s.siteInfo !== undefined) setSiteInfo(s.siteInfo);
+      if (s.preset !== undefined) setPreset(s.preset);
+      if (s.zones !== undefined) setZones(s.zones);
+      if (s.insight !== undefined) setInsight(s.insight);
+      if (s.autoNote !== undefined) setAutoNote(s.autoNote);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("SOL");
+    if (waiting) {
+      if (waiting.location !== undefined) setLocation(waiting.location);
+      if (waiting.siteInfo !== undefined) setSiteInfo(waiting.siteInfo);
+      if (waiting.preset !== undefined) setPreset(waiting.preset);
+      if (waiting.zones !== undefined) setZones(waiting.zones);
+      if (waiting.insight !== undefined) setInsight(waiting.insight);
+      if (waiting.autoNote !== undefined) setAutoNote(waiting.autoNote);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("SOL");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("SOL", {
       calculate: calculateTokens,

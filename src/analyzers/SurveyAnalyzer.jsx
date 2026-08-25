@@ -11,7 +11,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -126,7 +126,15 @@ export default function SurveyAnalyzer() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      // Estimate from the tool's ACTUAL inputs, not from chunkState.sections -
+      // that is empty before a run, so the figure was a constant (~1 in, 1.4k out)
+      // regardless of what the user had typed.
+      const o = (() => { try { return structuredOpts(); } catch { return {}; } })();
+      const preview = JSON.stringify({
+        inputs: o.inputs || [],
+        findings: o.findings || [],
+        already: chunkState.sections || {},
+      }).slice(0, 60000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "analysis system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact
@@ -138,6 +146,34 @@ export default function SurveyAnalyzer() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("SUR", {
+      snapshot: () => ({ raw, parsed, analysis, overflowText, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.raw !== undefined) setRaw(s.raw);
+      if (s.parsed !== undefined) setParsed(s.parsed);
+      if (s.analysis !== undefined) setAnalysis(s.analysis);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("SUR");
+    if (waiting) {
+      if (waiting.raw !== undefined) setRaw(waiting.raw);
+      if (waiting.parsed !== undefined) setParsed(waiting.parsed);
+      if (waiting.analysis !== undefined) setAnalysis(waiting.analysis);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("SUR");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("SUR", {
       calculate: calculateTokens,

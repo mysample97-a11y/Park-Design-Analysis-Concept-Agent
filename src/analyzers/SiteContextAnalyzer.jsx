@@ -3,7 +3,7 @@ import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCir
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -118,6 +118,52 @@ export default function SiteContextAnalyzer() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("SCX", {
+      snapshot: () => ({ imageNotes, imageStatus, location, siteDescription, context, siteArea, zones, paths, insight, overflowText, webSources, groundingNote, includeOverflow, autoZoneNote }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.imageNotes !== undefined) setImageNotes(s.imageNotes);
+      if (s.imageStatus !== undefined) setImageStatus(s.imageStatus);
+      if (s.location !== undefined) setLocation(s.location);
+      if (s.siteDescription !== undefined) setSiteDescription(s.siteDescription);
+      if (s.context !== undefined) setContext(s.context);
+      if (s.siteArea !== undefined) setSiteArea(s.siteArea);
+      if (s.zones !== undefined) setZones(s.zones);
+      if (s.paths !== undefined) setPaths(s.paths);
+      if (s.insight !== undefined) setInsight(s.insight);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      if (s.autoZoneNote !== undefined) setAutoZoneNote(s.autoZoneNote);
+      },
+    });
+    const waiting = takePendingState("SCX");
+    if (waiting) {
+      if (waiting.imageNotes !== undefined) setImageNotes(waiting.imageNotes);
+      if (waiting.imageStatus !== undefined) setImageStatus(waiting.imageStatus);
+      if (waiting.location !== undefined) setLocation(waiting.location);
+      if (waiting.siteDescription !== undefined) setSiteDescription(waiting.siteDescription);
+      if (waiting.context !== undefined) setContext(waiting.context);
+      if (waiting.siteArea !== undefined) setSiteArea(waiting.siteArea);
+      if (waiting.zones !== undefined) setZones(waiting.zones);
+      if (waiting.paths !== undefined) setPaths(waiting.paths);
+      if (waiting.insight !== undefined) setInsight(waiting.insight);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+      if (waiting.autoZoneNote !== undefined) setAutoZoneNote(waiting.autoZoneNote);
+    }
+    return () => unregisterToolState("SCX");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("SCX", {
       calculate: calculateTokens,

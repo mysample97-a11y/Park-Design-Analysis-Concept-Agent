@@ -3,7 +3,7 @@ import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActiveBusy, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActiveBusy, clearActiveTool, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -112,6 +112,54 @@ export default function ConceptGenerator() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("CPT", {
+      snapshot: () => ({ brief, briefFileNote, userIdeas, siteAreaM2, siteContext, numConcepts, concepts, recommendation, progress, locationCtx, projectLocation, overflowText, webSources, groundingNote, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.brief !== undefined) setBrief(s.brief);
+      if (s.briefFileNote !== undefined) setBriefFileNote(s.briefFileNote);
+      if (s.userIdeas !== undefined) setUserIdeas(s.userIdeas);
+      if (s.siteAreaM2 !== undefined) setSiteAreaM2(s.siteAreaM2);
+      if (s.siteContext !== undefined) setSiteContext(s.siteContext);
+      if (s.numConcepts !== undefined) setNumConcepts(s.numConcepts);
+      if (s.concepts !== undefined) setConcepts(s.concepts);
+      if (s.recommendation !== undefined) setRecommendation(s.recommendation);
+      if (s.progress !== undefined) setProgress(s.progress);
+      if (s.locationCtx !== undefined) setLocationCtx(s.locationCtx);
+      if (s.projectLocation !== undefined) setProjectLocation(s.projectLocation);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("CPT");
+    if (waiting) {
+      if (waiting.brief !== undefined) setBrief(waiting.brief);
+      if (waiting.briefFileNote !== undefined) setBriefFileNote(waiting.briefFileNote);
+      if (waiting.userIdeas !== undefined) setUserIdeas(waiting.userIdeas);
+      if (waiting.siteAreaM2 !== undefined) setSiteAreaM2(waiting.siteAreaM2);
+      if (waiting.siteContext !== undefined) setSiteContext(waiting.siteContext);
+      if (waiting.numConcepts !== undefined) setNumConcepts(waiting.numConcepts);
+      if (waiting.concepts !== undefined) setConcepts(waiting.concepts);
+      if (waiting.recommendation !== undefined) setRecommendation(waiting.recommendation);
+      if (waiting.progress !== undefined) setProgress(waiting.progress);
+      if (waiting.locationCtx !== undefined) setLocationCtx(waiting.locationCtx);
+      if (waiting.projectLocation !== undefined) setProjectLocation(waiting.projectLocation);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("CPT");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("CPT", {
       calculate: calculateTokens,

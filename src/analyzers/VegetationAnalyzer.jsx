@@ -9,7 +9,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -72,7 +72,15 @@ export default function VegetationAnalyzer() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify(chunkState.sections || {}).slice(0, 20000);
+      // Estimate from the tool's ACTUAL inputs, not from chunkState.sections -
+      // that is empty before a run, so the figure was a constant (~1 in, 1.4k out)
+      // regardless of what the user had typed.
+      const o = (() => { try { return structuredOpts(); } catch { return {}; } })();
+      const preview = JSON.stringify({
+        inputs: o.inputs || [],
+        findings: o.findings || [],
+        already: chunkState.sections || {},
+      }).slice(0, 60000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "analysis system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact
@@ -84,6 +92,54 @@ export default function VegetationAnalyzer() {
   // Publish this tool's estimator and reset to the rails. Registered on mount
   // and refreshed whenever the estimate changes, so the Budget rail can offer
   // "Calculate tokens" and show the result for the tool actually on screen.
+  // Session save/load. The snapshot is this tool's USER INPUT - not derived
+  // values, not loading flags - so a restored session looks like the moment
+  // it was saved. Registered on mount; pending state from a session loaded
+  // before this tool was opened is collected here too.
+  useEffect(() => {
+    registerToolState("VEG", {
+      snapshot: () => ({ location, PLANT_PALETTE, researching, researchNote, terrainNote, photoNotes, waterFilter, siteContext, structuring, inventory, insight, overflowText, webSources, groundingNote, includeOverflow }),
+      restore: (s) => {
+        if (!s || typeof s !== "object") return;
+      if (s.location !== undefined) setLocation(s.location);
+      if (s.PLANT_PALETTE !== undefined) setPalette(s.PLANT_PALETTE);
+      if (s.researching !== undefined) setResearching(s.researching);
+      if (s.researchNote !== undefined) setResearchNote(s.researchNote);
+      if (s.terrainNote !== undefined) setTerrainNote(s.terrainNote);
+      if (s.photoNotes !== undefined) setPhotoNotes(s.photoNotes);
+      if (s.waterFilter !== undefined) setWaterFilter(s.waterFilter);
+      if (s.siteContext !== undefined) setSiteContext(s.siteContext);
+      if (s.structuring !== undefined) setStructuring(s.structuring);
+      if (s.inventory !== undefined) setInventory(s.inventory);
+      if (s.insight !== undefined) setInsight(s.insight);
+      if (s.overflowText !== undefined) setOverflowText(s.overflowText);
+      if (s.webSources !== undefined) setWebSources(s.webSources);
+      if (s.groundingNote !== undefined) setGroundingNote(s.groundingNote);
+      if (s.includeOverflow !== undefined) setIncludeOverflow(s.includeOverflow);
+      },
+    });
+    const waiting = takePendingState("VEG");
+    if (waiting) {
+      if (waiting.location !== undefined) setLocation(waiting.location);
+      if (waiting.PLANT_PALETTE !== undefined) setPalette(waiting.PLANT_PALETTE);
+      if (waiting.researching !== undefined) setResearching(waiting.researching);
+      if (waiting.researchNote !== undefined) setResearchNote(waiting.researchNote);
+      if (waiting.terrainNote !== undefined) setTerrainNote(waiting.terrainNote);
+      if (waiting.photoNotes !== undefined) setPhotoNotes(waiting.photoNotes);
+      if (waiting.waterFilter !== undefined) setWaterFilter(waiting.waterFilter);
+      if (waiting.siteContext !== undefined) setSiteContext(waiting.siteContext);
+      if (waiting.structuring !== undefined) setStructuring(waiting.structuring);
+      if (waiting.inventory !== undefined) setInventory(waiting.inventory);
+      if (waiting.insight !== undefined) setInsight(waiting.insight);
+      if (waiting.overflowText !== undefined) setOverflowText(waiting.overflowText);
+      if (waiting.webSources !== undefined) setWebSources(waiting.webSources);
+      if (waiting.groundingNote !== undefined) setGroundingNote(waiting.groundingNote);
+      if (waiting.includeOverflow !== undefined) setIncludeOverflow(waiting.includeOverflow);
+    }
+    return () => unregisterToolState("VEG");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setActiveTool("VEG", {
       calculate: calculateTokens,

@@ -108,3 +108,73 @@ export function setActiveBusy(code, busy, cancel) {
 export function getActiveBusy() {
   return { busy: !!active.busy, cancel: active.cancel || null };
 }
+
+/* ===========================================================================
+ * TOOL STATE SNAPSHOT — session save/load
+ *
+ * Why the saved file restored nothing: the exporter only copied localStorage
+ * keys. Everything a user types - location, description, zones, pasted survey
+ * text, facility tables - lives in React state, which is not in localStorage and
+ * is gone the moment the tab closes. The file was real, and almost empty.
+ *
+ * Each tool now registers a snapshot/restore pair. The tool owns the shape,
+ * because only it knows which of its state is user input and which is derived.
+ *
+ * API keys are NEVER included: session files get emailed and synced, and a key
+ * in one is the one thing genuinely worth stealing.
+ * ========================================================================= */
+
+const snapshots = new Map();   // code -> { snapshot(), restore(state) }
+
+export function registerToolState(code, handlers = {}) {
+  if (typeof handlers.snapshot !== "function") return;
+  snapshots.set(code, {
+    snapshot: handlers.snapshot,
+    restore: typeof handlers.restore === "function" ? handlers.restore : null,
+  });
+}
+
+export function unregisterToolState(code) {
+  snapshots.delete(code);
+}
+
+/** Every mounted tool's state. Tools not yet opened are simply absent. */
+export function snapshotAllTools() {
+  const out = {};
+  snapshots.forEach((h, code) => {
+    try {
+      const v = h.snapshot();
+      if (v && typeof v === "object") out[code] = v;
+    } catch { /* one bad tool must not lose the rest of the session */ }
+  });
+  return out;
+}
+
+/**
+ * Restores what it can and reports what it could not.
+ * A tool that has never been opened is not mounted, so it has no restore
+ * function - its state is kept in the pending map and applied when it mounts.
+ */
+const pending = new Map();
+
+export function restoreAllTools(byCode) {
+  const applied = [], deferred = [];
+  Object.keys(byCode || {}).forEach((code) => {
+    const h = snapshots.get(code);
+    if (h && h.restore) {
+      try { h.restore(byCode[code]); applied.push(code); return; }
+      catch { /* fall through to deferral */ }
+    }
+    pending.set(code, byCode[code]);
+    deferred.push(code);
+  });
+  return { applied, deferred };
+}
+
+/** Called by a tool as it mounts, to collect state restored before it existed. */
+export function takePendingState(code) {
+  if (!pending.has(code)) return null;
+  const v = pending.get(code);
+  pending.delete(code);
+  return v;
+}

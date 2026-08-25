@@ -174,7 +174,10 @@ export default { buildSession, saveSessionToFile, loadSessionFromFile, SESSION_F
 
 const OWNED_PREFIXES = ["as2p_"];
 
-export function exportAppSession() {
+// Imported lazily inside the functions to avoid a circular import at module load.
+
+
+export function exportAppSession(toolState = {}) {
   const data = {};
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -191,11 +194,15 @@ export function exportAppSession() {
     savedAt: new Date().toISOString(),
     app: "Al Safa 2 Site Analysis Suite",
     storage: data,
+    // The part that was missing: everything typed into the tools. Without this
+    // the file held only counters and partial AI output, so loading it appeared
+    // to do nothing at all.
+    toolState: stripSecrets(toolState),
   };
 }
 
-export function saveAppSessionToFile() {
-  const session = exportAppSession();
+export function saveAppSessionToFile(toolState = {}) {
+  const session = exportAppSession(toolState);
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
   const name = `alsafa2-session-${stamp}.json`;
   const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
@@ -207,7 +214,11 @@ export function saveAppSessionToFile() {
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  return { name, keys: Object.keys(session.storage).length };
+  return {
+    name,
+    keys: Object.keys(session.storage).length,
+    tools: Object.keys(session.toolState || {}).length,
+  };
 }
 
 export async function loadAppSessionFromFile(file) {
@@ -236,6 +247,7 @@ export async function loadAppSessionFromFile(file) {
 
   return {
     restored,
+    toolState: parsed.toolState || {},
     savedAt: parsed.savedAt,
     note:
       `Restored ${restored} saved item${restored === 1 ? "" : "s"} from ` +
