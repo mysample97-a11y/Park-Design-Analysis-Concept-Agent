@@ -4,6 +4,7 @@ import { subscribeActiveTool, setActiveEstimate } from "./utils/toolBridge";
 import { Home, MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
 import Landing from "./components/Landing";
 import TokenRails from "./components/TokenRails";
+import ToolErrorBoundary from "./components/ToolErrorBoundary";
 import SettingsPanel, { useApiKeys } from "./components/SettingsPanel";
 import SolarAnalyzer from "./analyzers/SolarAnalyzer";
 import SurveyAnalyzer from "./analyzers/SurveyAnalyzer";

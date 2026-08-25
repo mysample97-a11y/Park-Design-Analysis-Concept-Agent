@@ -273,6 +273,40 @@ check("Theme", "rails keep their own button styling",
 check("Theme", "header, main and settings share one padding rule",
   /\.as2p-shell > div:not\(\.as2p-rail-stack\) \{\s*\n?\s*padding-left/.test(F.css));
 
+
+/* ------------------------------------------ 12. IMPORT INTEGRITY
+ * A JSX component referenced but never imported COMPILES CLEANLY and then
+ * throws "X is not defined" the moment that branch renders. That is exactly how
+ * <ToolErrorBoundary> shipped and blanked the page on opening Site Context.
+ * The build cannot catch it; this can.
+ */
+{
+  const files = { "App.jsx": F.app, "TokenRails.jsx": F.rails, "SettingsPanel.jsx": F.settings,
+                  ...Object.fromEntries(TOOLS.map((t) => [t + ".jsx", A[t]])) };
+  for (const [name, src] of Object.entries(files)) {
+    if (!src) continue;
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+    const used = new Set([...code.matchAll(/<([A-Z][A-Za-z0-9_]*)[\s/>]/g)].map((m) => m[1]));
+    // Imports may span multiple lines, so match the whole statement including
+    // newlines. The single-line version reported nine phantom failures.
+    const imported = new Set();
+    for (const m of code.matchAll(/import\s+([\s\S]*?)\s+from\s*["']/g)) {
+      const clause = m[1];
+      const named = clause.match(/\{([\s\S]*?)\}/);
+      if (named) named[1].split(",").forEach((x) => {
+        const n = x.trim().split(/\s+as\s+/).pop().trim();
+        if (n) imported.add(n);
+      });
+      const def = clause.replace(/\{[\s\S]*?\}/, "").split(",")[0].trim();
+      if (def && /^[A-Za-z0-9_$*]+$/.test(def)) imported.add(def.replace(/^\*\s*as\s*/, ""));
+    }
+    const declared = new Set([...code.matchAll(/(?:function|const|class)\s+([A-Z][A-Za-z0-9_]*)/g)].map((m) => m[1]));
+    const missing = [...used].filter((u) => !imported.has(u) && !declared.has(u) && !/^(Fragment|React|Component)$/.test(u));
+    check("Imports", `${name}: every JSX component is imported or declared`,
+      missing.length === 0, missing.join(", "));
+  }
+}
+
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];
 for (const g of groups) {
