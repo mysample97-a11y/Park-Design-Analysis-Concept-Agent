@@ -108,12 +108,21 @@ input, textarea, select { color: #1C2333; }
 .as2p-rail-stack::-webkit-scrollbar { width: 6px; }
 .as2p-rail-stack::-webkit-scrollbar-thumb { background: #23344C; border-radius: 3px; }
 
+/*
+ * REMOVED: a second offset system that fought the shell rule below.
+ *
+ * This block put `padding-left: 262px` on the theme container WHILE the
+ * `.as2p-shell > *` rule adds `margin-left` to each child. Elements matched by
+ * both - the header, the settings panel, the tab ribbon - were pushed twice and
+ * ended up far right of the tool cards, which were pushed once. That is the
+ * misalignment, and it survived several attempted fixes because each one
+ * adjusted only ONE of the two systems.
+ *
+ * There is now exactly one source of horizontal offset: the shell rule. Do not
+ * add padding to .as2p-tools-theme.
+ */
 @media (min-width: 1280px) {
-  /* every child of the themed view is pushed clear of the rail column */
-  .as2p-tools-theme { padding-left: 262px; }
-  .as2p-tools-theme .max-w-6xl { max-width: none !important; margin-right: 24px; }
-  .as2p-tools-theme .as2p-wide,
-  .as2p-tools-theme .as2p-rail-main { margin-left: 0; margin-right: 24px; max-width: none; }
+  .as2p-tools-theme .max-w-6xl { max-width: none !important; margin-left: 0 !important; margin-right: 0 !important; }
 }
 @media (max-width: 1279px) { .as2p-rail-stack { display: none; } }
 
@@ -395,35 +404,45 @@ input, textarea, select { color: #1C2333; }
 }
 
 /* ---------------------------------------------------------------------------
-   SHELL OFFSET
+   SHELL OFFSET  (rev 7 — single source)
 
-   The rails are fixed in the left gutter. EVERY direct child of the tool view -
-   header, settings panel, main - is offset by the same amount, so no section
-   can slide underneath them. The tool column and settings then run to within
-   24px of the right edge, which removes the wide empty gutter that was there.
+   Earlier revisions set margins on each direct child (header, settings, main).
+   That kept mis-aligning because every child carries different Tailwind padding
+   and width classes, so each one resolved to a slightly different left edge and
+   the title sat further right than the cards below it.
 
-   .as2p-wide deliberately carries NO margin of its own: it inherits the offset
-   from its parent. Setting it in both places was what produced the double
-   indent and the clash.
+   Now the offset is applied ONCE, as padding on the shell itself. Children
+   inherit the content box, so the header, the settings panel, the tab ribbon and
+   the tool cards all begin on exactly the same line by construction - there is
+   no per-element number left to get wrong.
+
+   The rails are position:fixed and sit in the reserved gutter, so they are
+   unaffected by this padding.
 --------------------------------------------------------------------------- */
+.as2p-shell {
+  /* rails: left 14px + 238px wide = 252px. 12px clearance. */
+  padding-left: 264px;
+  padding-right: 20px;
+  box-sizing: border-box;
+}
+
+/* Children must not add an offset of their own, or the double-indent returns. */
 .as2p-shell > header,
 .as2p-shell > main,
-.as2p-shell > div:not(.as2p-rail-stack) {
-  /* rails end at 14 + 238 = 252px; 12px clearance puts content flush
-     against them with no dead gutter. */
-  margin-left: 264px;
-  margin-right: 20px;
-}
-/* .as2p-wide only removes Tailwind's max-width/centring. It must NOT zero the
-   margins: <main> carries both the shell rule (262px) and this class, and an
-   !important margin here beat the shell rule - so the content sat at x=0 while
-   the header sat at 262px. That inversion is what made the title look shifted. */
-.as2p-shell .as2p-wide {
+.as2p-shell > div {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
   max-width: none !important;
-  width: auto !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
-/* .as2p-rail-main is INSIDE main, so it inherits main's offset and must not add
-   another one. */
+/* Inner wrappers keep a small readable inset, applied in ONE place. */
+.as2p-shell > header > *,
+.as2p-shell > main > *,
+.as2p-shell > div > * {
+  max-width: none !important;
+}
+.as2p-shell .as2p-wide,
 .as2p-shell .as2p-rail-main {
   margin-left: 0 !important;
   margin-right: 0 !important;
@@ -432,9 +451,7 @@ input, textarea, select { color: #1C2333; }
 }
 
 @media (max-width: 1279px) {
-  .as2p-shell > header,
-  .as2p-shell > main,
-  .as2p-shell > div:not(.as2p-rail-stack) { margin-left: 12px; margin-right: 12px; }
+  .as2p-shell { padding-left: 12px; padding-right: 12px; }
 }
 
 /* ---------------------------------------------------------------------------

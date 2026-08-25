@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, AlertTriangle, Info, Layers, Copy, CheckCircle2, Upload, FileText } from "lucide-react";
 import * as XLSX from "xlsx";
 import * as mammoth from "mammoth";
@@ -8,7 +8,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -46,6 +46,27 @@ export default function CombinedDocumentGenerator() {
   const [inputs, setInputs] = useState(() => Object.fromEntries(SECTIONS.map((s) => [s.id, s.default])));
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("CMB"));
   const noteUsage = (u) => setTokenUsage(recordUsage("CMB", u));
   /*
@@ -85,13 +106,15 @@ export default function CombinedDocumentGenerator() {
   useEffect(() => {
     setActiveTool("CMB", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("CMB")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("CMB")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("CMB");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("CMB", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("CMB", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
   useEffect(() => {
@@ -122,6 +145,7 @@ export default function CombinedDocumentGenerator() {
       "same content, read instantly, and need no key at all.");
     return await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
       // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
       // passing `model` threw "model is not defined" the moment a file was uploaded.
       provider, apiKey, maxTokens: 3000,
@@ -170,6 +194,7 @@ export default function CombinedDocumentGenerator() {
       const combined = filled.map((sec) => `## ${sec.label}\n${inputs[sec.id]}`).join("\n\n");
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 2000, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
@@ -232,6 +257,7 @@ export default function CombinedDocumentGenerator() {
                 done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 6000,
         content:
           "You are compiling a Site Analysis and Opportunities Assessment for a park redesign, from six input sections below. Produce: " +

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, Plus, Trash2, Wind, AlertTriangle, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -9,7 +9,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -24,6 +24,27 @@ export default function WindAnalyzer() {
   const [location, setLocation] = useState("");
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("WND"));
   const noteUsage = (u) => setTokenUsage(recordUsage("WND", u));
   /*
@@ -65,13 +86,15 @@ export default function WindAnalyzer() {
   useEffect(() => {
     setActiveTool("WND", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("WND")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("WND")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("WND");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("WND", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("WND", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
   useEffect(() => {
@@ -95,6 +118,7 @@ export default function WindAnalyzer() {
     try {
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 1400, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `For the location "${location}", give the prevailing seasonal wind characteristics. Respond with ONLY a JSON array of 4 season objects, no markdown fences: [{"id":"winter","label":"Winter (months)","prevailing":"compass direction","speedRange":"x-y km/h","character":"one sentence","dustRisk":"Low|Medium|High"}]. Use the four seasons appropriate to that location's climate. Base this on published climate references; do not invent precise wind-rose percentages.`,
@@ -229,6 +253,7 @@ export default function WindAnalyzer() {
                 done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 2500,
         content: "You are a wind consultant advising on pedestrian-level wind comfort for a park design. Use ONLY the seasonal wind data, comfort-threshold assessment and zone list below - no invented statistics. The comfort thresholds are from the City of Ottawa Wind Analysis Terms of Reference (sitting 10 km/h, standing 14, strolling 17, walking 20, hazard 90). Where a season exceeds a threshold, say which activities become uncomfortable and in which season. For each zone give a one-line recommendation on whether to keep it open to the prevailing breeze or add windbreak screening. Then write a 'conclusion' field: 2-3 sentences naming the single highest-priority zone/action. Be explicit wind data here is qualitative/seasonal, not precise wind-rose measurement. Also return: 'governing_criteria' (one sentence naming the comfort criteria actually applied and whether the project location publishes its own), 'extreme_events' (array of {event, likelihood, design_response} for storm/shamal/dust events documented for this region - empty array if none are documented), and 'contextual_effects' (array of {factor, applies (boolean), implication} covering effects such as downwash from adjacent tall buildings, channelling between blocks, and corner acceleration). Respond with ONLY valid JSON, no markdown fences: {\"zone_recommendations\": [{\"zone\": \"\", \"recommendation\": \"\"}], \"governing_criteria\": \"\", \"extreme_events\": [{\"event\": \"\", \"likelihood\": \"\", \"design_response\": \"\"}], \"contextual_effects\": [{\"factor\": \"\", \"applies\": true, \"implication\": \"\"}], \"conclusion\": \"\"}" + checklistPrompt("WND") + "\n\nDATA:\n" + JSON.stringify(summary, null, 2) + chunkInstruction,
       });

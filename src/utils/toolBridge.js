@@ -71,4 +71,40 @@ export function subscribeActiveTool(fn) {
   return () => listeners.delete(fn);
 }
 
-export default { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, getActiveTool, subscribeActiveTool };
+export default { setActiveTool, setActiveEstimate, setActiveBusy, setActivePartial, clearActiveTool, getActiveTool, subscribeActiveTool };
+
+/* ===========================================================================
+ * BUSY STATE AND CANCELLATION
+ *
+ * Reported problem: "Researching..." sat there for minutes with no error and no
+ * way out. Two separate faults behind that:
+ *
+ *   1. NO TIMEOUT. fetch() waits indefinitely by default. If a provider accepts
+ *      the connection and then stalls, the promise never settles, no catch runs,
+ *      and the spinner spins forever. Silence is indistinguishable from work.
+ *   2. NO WAY TO STOP. Even knowing it was stuck, the only exit was reloading
+ *      the page, which loses everything not yet persisted.
+ *
+ * The tool publishes its busy state and an abort function here; the rails render
+ * a Stop button while it is set. Cancelling aborts the in-flight request, so the
+ * connection is actually closed rather than merely ignored.
+ * ========================================================================= */
+
+/**
+ * @param {string} code   tool code
+ * @param {boolean} busy  is a request in flight
+ * @param {Function} [cancel] aborts it
+ */
+export function setActiveBusy(code, busy, cancel) {
+  if (active.code !== code) return;          // a hidden tool must not speak for the visible one
+  active = {
+    ...active,
+    busy: !!busy,
+    cancel: typeof cancel === "function" ? cancel : (busy ? active.cancel : null),
+  };
+  notify();
+}
+
+export function getActiveBusy() {
+  return { busy: !!active.busy, cancel: active.cancel || null };
+}

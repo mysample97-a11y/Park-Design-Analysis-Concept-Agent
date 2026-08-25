@@ -340,6 +340,8 @@ export default function App() {
               setCounting(true);
               try { await activeTool.calculate(); } finally { setCounting(false); }
             } : null}
+            busy={activeTool.busy}
+            onCancel={activeTool.cancel}
             onClearEstimate={activeTool.code ? () => setActiveEstimate(activeTool.code, null) : null}
             onReset={activeTool.resetUsage ? () => {
               activeTool.resetUsage();

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, Plus, Trash2, Sun, Info, AlertTriangle, Search } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from "recharts";
 import { useAppContext } from "../App";
@@ -10,7 +10,7 @@ import {
   isComplete, progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -98,6 +98,27 @@ export default function SolarAnalyzer() {
   const [location, setLocation] = useState("");
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("SOL"));
   const noteUsage = (u) => setTokenUsage(recordUsage("SOL", u));
   // PDF export opens a new tab; browsers block that silently. This surfaces it -
@@ -172,13 +193,15 @@ export default function SolarAnalyzer() {
   useEffect(() => {
     setActiveTool("SOL", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("SOL")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("SOL")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("SOL");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("SOL", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("SOL", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
 
@@ -200,6 +223,7 @@ export default function SolarAnalyzer() {
     try {
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 900, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `Find the approximate latitude, longitude, and UTC timezone offset (as a number, e.g. 4 for UTC+4) for this location: "${location}". Respond with ONLY valid JSON, no markdown fences: {"lat": 0, "lon": 0, "utc_offset": 0, "resolved_name": "", "source": "how you determined this"}`,
@@ -232,6 +256,7 @@ export default function SolarAnalyzer() {
     try {
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 1600, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
@@ -370,6 +395,7 @@ export default function SolarAnalyzer() {
       });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 2500, useWebSearch: false,
         content: "You are a landscape architect interpreting computed solar geometry for a site. Use ONLY the computed data supplied - never invent temperature, UV or radiation figures. " +
           "Assess the site against the published shade coverage targets provided, and state where the site will fail them. " +

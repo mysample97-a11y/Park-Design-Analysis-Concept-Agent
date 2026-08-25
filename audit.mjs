@@ -307,6 +307,30 @@ check("Theme", "header, main and settings share one padding rule",
   }
 }
 
+
+/* ------------------------------- 13. FUNCTION IMPORT INTEGRITY
+ * The check above covers JSX components. This covers plain functions from our
+ * own modules - setActiveBusy was called in seven tools and imported in one,
+ * and `npm run build` reported success. Only a runtime click found it.
+ */
+{
+  const OWN = ["setActiveTool","setActiveEstimate","setActiveBusy","clearActiveTool",
+               "buildChunkedPrompt","mergeChunk","emptyState","isComplete","progressLabel",
+               "savePartial","loadPartial","clearPartial","countTokensExact","estimateRun",
+               "getUsage","recordUsage","resetUsage","missingFields","missingFieldsNote",
+               "callAI","abortMessage"];
+  for (const t of TOOLS) {
+    const code = A[t].replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+    const importBlock = (code.match(/import[\s\S]*?from\s*["'][^"']+["'];?/g) || []).join("\n");
+    const missing = OWN.filter((fn) =>
+      new RegExp("(?<![\\w$.])" + fn + "\\s*\\(").test(code) &&
+      !new RegExp("(?<![\\w$])" + fn + "(?![\\w$])").test(importBlock) &&
+      !new RegExp("function\\s+" + fn + "(?![\\w$])").test(code));
+    check("Imports", `${t}: every imported function it calls is imported`,
+      missing.length === 0, missing.join(", "));
+  }
+}
+
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];
 for (const g of groups) {

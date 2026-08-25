@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, AlertTriangle, Layers, Upload} from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActiveBusy, clearActiveTool } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -58,6 +58,27 @@ export default function ConceptGenerator() {
   const [brief, setBrief] = useState("");
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("CPT"));
   const noteUsage = (u) => setTokenUsage(recordUsage("CPT", u));
   /*
@@ -94,13 +115,15 @@ export default function ConceptGenerator() {
   useEffect(() => {
     setActiveTool("CPT", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("CPT")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("CPT")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("CPT");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("CPT", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("CPT", busy); }, [busy]);
   // File ingestion. This tool previously accepted pasted text ONLY, so a user had to
   // open an exported report, select all, copy and paste it in by hand - for every run.
   const [briefFileNote, setBriefFileNote] = useState("");
@@ -115,6 +138,7 @@ export default function ConceptGenerator() {
       "same content, read instantly, and need no key at all.");
     return await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
       // NOTE: no `model` here. This context exposes { provider, apiKey, meta } only -
       // passing `model` threw "model is not defined" the moment a file was uploaded.
       provider, apiKey, maxTokens: 3000,
@@ -166,6 +190,7 @@ export default function ConceptGenerator() {
     try {
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 2200, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content:
@@ -219,6 +244,7 @@ export default function ConceptGenerator() {
         const prior = built.map((c) => c.name).filter(Boolean);
         const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
           provider, apiKey, maxTokens: 4000,
           content:
             "You are a landscape architecture concept-design assistant. Given the site analysis findings and " +
@@ -288,6 +314,7 @@ export default function ConceptGenerator() {
       }));
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 1400,
         content:
           "Given these scored park design concepts, recommend which to move forward with. " +

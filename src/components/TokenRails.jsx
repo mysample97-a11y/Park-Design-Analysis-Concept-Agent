@@ -249,7 +249,8 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
 }
 
 /** RIGHT RAIL - what you have spent. */
-export function UsageRail({ usage, provider = "claude", partial = null, onReset = null }) {
+export function UsageRail({ usage, provider = "claude", partial = null, onReset = null,
+                            onCancel = null, busy = false }) {
   const [sessionNote, setSessionNote] = React.useState("");
   const u = usage || { total: 0, input: 0, output: 0, calls: 0, estimated: false };
   return (
@@ -258,6 +259,26 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
       <div style={{ fontSize: 10, color: "#7286A0", marginBottom: 8 }}>
         via {String(provider).toLowerCase().includes("gemini") ? "Google Gemini" : "Anthropic Claude"}
       </div>
+
+      {busy && onCancel && (
+        <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px solid #22304A" }}>
+          <div style={{ fontSize: 11, color: "#FFC79A", marginBottom: 5 }}>
+            Request in flight...
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{ width: "100%", padding: "6px 8px", fontSize: 11.5, borderRadius: 6,
+              cursor: "pointer", background: "#3E230E", border: "1px solid #FF8A3D", color: "#FFE2CB" }}
+          >
+            Cancel request
+          </button>
+          <div style={{ fontSize: 9.5, color: "#7E90A6", marginTop: 5, lineHeight: 1.4 }}>
+            Requests time out on their own after 90s. Cancelling keeps everything
+            already generated.
+          </div>
+        </div>
+      )}
 
       <div style={LABEL}>Tokens</div>
       <div style={BIG}>{formatTokens(u.total)}</div>
@@ -364,7 +385,8 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
  * worse than none, and every tool still carries its own inline meter.
  */
 export default function TokenRails({ provider, usage, estimate, partial, onReset,
-                                    onCalculate, onClearEstimate, calculating, children }) {
+                                    onCalculate, onClearEstimate, calculating,
+                                    onCancel, busy, children }) {
   // The rails are position:fixed in the page gutters, so they take NO width
   // from the centre column. An earlier revision used a 3-column grid and shrank
   // every tool - do not reintroduce that.
@@ -381,7 +403,8 @@ export default function TokenRails({ provider, usage, estimate, partial, onReset
           onClearEstimate={onClearEstimate}
           calculating={calculating}
         />
-        <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset} />
+        <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset}
+          onCancel={onCancel} busy={busy} />
       </aside>
 
       <div className="as2p-rail-main as2p-wide">{children}</div>

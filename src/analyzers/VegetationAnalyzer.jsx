@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, Leaf, Info, Mountain, AlertTriangle, ImageIcon, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -9,7 +9,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -24,6 +24,27 @@ export default function VegetationAnalyzer() {
   const [location, setLocation] = useState("");
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("VEG"));
   const noteUsage = (u) => setTokenUsage(recordUsage("VEG", u));
   /*
@@ -66,13 +87,15 @@ export default function VegetationAnalyzer() {
   useEffect(() => {
     setActiveTool("VEG", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("VEG")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("VEG")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("VEG");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("VEG", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("VEG", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
   useEffect(() => {
@@ -97,6 +120,7 @@ export default function VegetationAnalyzer() {
     try {
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 3000, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: `For the location "${location}", give a reference planting palette of 10-14 species suitable for public landscape there, prioritising native and climate-adapted species. Respond with ONLY a JSON array, no markdown fences: [{"id":"short_id","name":"Common name (Botanical name)","type":"Canopy Tree|Palm|Shrub|Groundcover|Accent","water":"Low|Medium|High","shade":"Full Sun|Part Shade|Shade","origin":"Native|Adaptive|Introduced - note"}]. Use real species that genuinely grow in that climate. Do not invent species.`,
@@ -142,6 +166,7 @@ export default function VegetationAnalyzer() {
     try {
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 1000,
         content: "Extract a structured inventory of EXISTING vegetation from these landscape architect site-visit notes/photo descriptions - only plants that are CURRENTLY on site right now, not suggestions for the future. For each distinct plant/tree mentioned, output: name, estimated_count (number or 'several'/'unclear'), condition (Healthy/Fair/Poor/Unclear), recommendation (Retain/Remove/Relocate/Assess further), notes (brief). If no existing vegetation is described (e.g. the text is only a general site description with no plants mentioned), return an empty array. Respond with ONLY a valid JSON array, no markdown, no prose.\n\nNOTES:\n" + (siteContext + (photoNotes ? "\n\nPHOTO OBSERVATIONS (AI-generated from uploaded site photos):\n" + photoNotes : "")),
       });
@@ -173,6 +198,7 @@ export default function VegetationAnalyzer() {
       contentBlocks.push({ type: "text", text: "These are site-visit photos from a park redesign project. Describe what vegetation/trees/plants are visible across all photos - species if identifiable, apparent condition, approximate count per photo. Write this as plain field notes (a few sentences per photo), the way a landscape architect would jot down observations. Do not describe anything other than vegetation." });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 3000,
         content: contentBlocks,
       });
@@ -218,6 +244,7 @@ export default function VegetationAnalyzer() {
                 done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 1500,
         content: "You are a landscape architecture assistant giving planting and site-condition guidance for a park design at the stated location. The 'general_reference_palette' is a reference list of species appropriate to that region - it is NOT specific to this site yet; your job is to reason about which of these actually fit THIS site given the terrain/soil reference and any user-provided site context or existing inventory. Do not invent species outside the reference list, and do not invent terrain/soil facts beyond what's given. Provide: " +
           "(1) 'terrain_soil_note': 1-2 sentences on what the terrain/soil data means for planting choices and what to verify once real data arrives, " +

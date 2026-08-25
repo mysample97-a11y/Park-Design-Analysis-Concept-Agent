@@ -95,6 +95,60 @@ const MAX_ATTEMPTS = 3;
  * genuine transients and keep the shorter escalating backoff.
  */
 const CAPACITY_STATUSES = [503, 529];
+
+/*
+ * REQUEST TIMEOUT AND CANCELLATION
+ *
+ * fetch() has NO default timeout. If a provider accepts a connection and then
+ * never answers, the promise simply never settles - so the UI sits on
+ * "Researching..." indefinitely with no error, no failure and no way out. That
+ * is worse than an error, because nothing tells the user anything is wrong.
+ *
+ * Every request now carries:
+ *   - a hard timeout, after which it aborts and reports honestly;
+ *   - an external AbortSignal, so a Cancel button can stop it on demand.
+ *
+ * 90s is deliberately generous: a grounded request doing several web searches
+ * legitimately takes 30-60s, and cutting off real work would be worse than
+ * waiting.
+ */
+export const REQUEST_TIMEOUT_MS = 90000;
+
+/** Merges our timeout with any caller-supplied cancel signal. */
+function makeSignal(externalSignal, ms = REQUEST_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+
+  /*
+   * ALREADY-ABORTED SIGNALS MUST THROW, NOT ABORT.
+   *
+   * If the caller's signal is already aborted, calling ctrl.abort() here fires
+   * BEFORE fetch attaches its abort listener - so fetch never rejects and the
+   * promise never settles. That is a spinner with no timeout behind it at all,
+   * which is worse than the hang this function exists to prevent.
+   *
+   * Throwing synchronously puts the failure in the caller's catch immediately.
+   */
+  if (externalSignal && externalSignal.aborted) {
+    const e = new Error("cancelled");
+    e.name = "AbortError";
+    throw e;
+  }
+
+  const timer = setTimeout(() => ctrl.abort(new Error("timeout")), ms);
+  if (externalSignal) {
+    externalSignal.addEventListener("abort", () => ctrl.abort(new Error("cancelled")), { once: true });
+  }
+  return { signal: ctrl.signal, done: () => clearTimeout(timer) };
+}
+
+/** Turns an abort into a message that says WHICH kind of stop it was. */
+export function abortMessage(err, externalSignal) {
+  const cancelled = externalSignal && externalSignal.aborted;
+  if (cancelled) return "Cancelled. Nothing already generated has been lost - press Continue to resume.";
+  return `The request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s without a reply. ` +
+         "The provider accepted the connection and then stopped responding - this is at their end, " +
+         "not your key or your input. Nothing already generated has been lost.";
+}
 function policyFor(status) {
   return CAPACITY_STATUSES.includes(status)
     ? { maxAttempts: 2, baseDelay: 6000 }
@@ -145,6 +199,8 @@ function backoffDelay(attempt) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+
 
 /**
  * Wraps a fetch-returning thunk with backoff on transient server failures.
@@ -221,7 +277,7 @@ export function transientMessage(status) {
 }
 
 // ---------- Gemini ----------
-export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry }) {
+export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry, abortSignal }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Gemini API key is missing. Please enter your API key in Settings.");
 
@@ -275,11 +331,15 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
   // each attempt gets a fresh, unread body. Reading json() after a retried
   // response would throw "body stream already read".
   async function sendRaw(body) {
-    return await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": cleanKey },
-      body: JSON.stringify(body),
-    });
+    const { signal, done } = makeSignal(abortSignal);
+    try {
+      return await fetch(url, {
+        signal,
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": cleanKey },
+        body: JSON.stringify(body),
+      });
+    } finally { done(); }
   }
 
   async function send(body) {
@@ -334,7 +394,7 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
 }
 
 // ---------- Claude ----------
-export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry }) {
+export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry, abortSignal }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Claude API key is missing. Please enter your API key in Settings.");
 
@@ -372,16 +432,22 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   if (systemInstruction) payload.system = systemInstruction;
   if (useWebSearch) payload.tools = [{ type: "web_search_20250305", name: "web_search" }];
 
-  const response = await withRetry(() => fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": cleanKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify(payload),
-  }), onRetry, "claude");
+  const response = await withRetry(async () => {
+    const { signal, done } = makeSignal(abortSignal);
+    try {
+      return await fetch(url, {
+        signal,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": cleanKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(payload),
+      });
+    } finally { done(); }
+  }, onRetry, "claude");
 
   // F8: read live quota off the response headers before touching the body.
   // Returns null when CORS has not exposed them, in which case the meter
@@ -427,6 +493,19 @@ function storedModel(provider) {
 }
 
 export async function callAI(opts = {}) {
+  // Wrap the whole call so an abort surfaces as a clear message rather than the
+  // browser's bare "The operation was aborted" - which tells the user nothing.
+  try {
+    return await callAIInner(opts);
+  } catch (e) {
+    if (e && (e.name === "AbortError" || /abort/i.test(String(e.message)))) {
+      throw new Error(abortMessage(e, opts.abortSignal));
+    }
+    throw e;
+  }
+}
+
+async function callAIInner(opts = {}) {
   const provider = String(opts.provider || opts.apiProvider || "gemini").toLowerCase();
   const apiKey = opts.apiKey || opts.key || "";
   const content = opts.content || opts.prompt || opts.userPrompt || "";
@@ -439,11 +518,13 @@ export async function callAI(opts = {}) {
   const onSources = opts.onSources || null;
   const onUsage = opts.onUsage || null;
   const onRetry = opts.onRetry || null;
+  const signal = opts.signal || null;
+  const abortSignal = opts.abortSignal || null;
 
   if (provider.includes("claude") || provider.includes("anthropic")) {
-    return await callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry });
+    return await callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry, abortSignal });
   }
-  return await callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry });
+  return await callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry, abortSignal });
 }
 
 export default callAI;

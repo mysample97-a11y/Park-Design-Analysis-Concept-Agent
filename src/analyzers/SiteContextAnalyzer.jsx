@@ -1,9 +1,9 @@
-import React, { useState, useEffect} from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
@@ -65,6 +65,27 @@ export default function SiteContextAnalyzer() {
   const [imageNotes, setImageNotes] = useState("");
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("SCX"));
   const noteUsage = (u) => setTokenUsage(recordUsage("SCX", u));
   /*
@@ -100,13 +121,15 @@ export default function SiteContextAnalyzer() {
   useEffect(() => {
     setActiveTool("SCX", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("SCX")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("SCX")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("SCX");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("SCX", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("SCX", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
   useEffect(() => {
@@ -156,7 +179,8 @@ export default function SiteContextAnalyzer() {
       }
       blocks.push({ type: "text", text: "These are site/GIS/map images for a park design project. Describe what surrounds the site on each edge - adjacent land uses, roads, buildings, transit, open space. Note anything relevant to arrival, access or noise. Write plain factual observations, no speculation." });
       const text = await callAI({
-        onUsage: noteUsage, provider, apiKey, maxTokens: 2500, content: blocks });
+        onUsage: noteUsage,
+      abortSignal: newAbort(), provider, apiKey, maxTokens: 2500, content: blocks });
       if (!text) throw new Error("The AI returned no description for these images.");
       setImageNotes((prev) => (prev ? prev + "\n\n" : "") + text);
       // Confirm on screen. Previously the button simply reverted to its idle
@@ -179,6 +203,7 @@ export default function SiteContextAnalyzer() {
     try {
       const resText = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 4000, useWebSearch: true,
         onSources: (g) => { setWebSources(g.sources || []); setGroundingNote(g.grounded ? "" : (g.note || "")); },
         content: SITE_PROMPT + checklistPrompt("SCX") +
@@ -275,6 +300,7 @@ export default function SiteContextAnalyzer() {
 
       const resText = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider,
         apiKey: apiKey,
         maxTokens: 4000,
@@ -451,6 +477,7 @@ export default function SiteContextAnalyzer() {
       const adj = (ctxData?.adjacencies || []).map((a) => `${a.direction}: ${a.land_use || "unknown"}`).join("; ");
       const resText = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         // No `model` - this context exposes { provider, apiKey, meta } only.
         provider, apiKey, maxTokens: 1200,
         content:

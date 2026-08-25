@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, BarChart3, AlertTriangle, Info, Upload, Image as ImageIcon, ChevronDown, ChevronRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useAppContext } from "../App";
@@ -11,7 +11,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
@@ -81,6 +81,27 @@ export default function SurveyAnalyzer() {
   const [raw, setRaw] = useState("");
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("SUR"));
   const noteUsage = (u) => setTokenUsage(recordUsage("SUR", u));
   /*
@@ -120,13 +141,15 @@ export default function SurveyAnalyzer() {
   useEffect(() => {
     setActiveTool("SUR", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("SUR")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("SUR")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("SUR");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("SUR", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("SUR", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
   useEffect(() => {
@@ -200,6 +223,7 @@ export default function SurveyAnalyzer() {
       const base64 = await fileToBase64Raw(file);
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 3500,
         content: [
           { type: "image", source: { type: "base64", media_type: file.type || "image/png", data: base64 } },
@@ -247,6 +271,7 @@ export default function SurveyAnalyzer() {
                 done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 3500,
         content: "You are a community engagement analyst. Analyse the survey responses below and produce a genuinely useful synthesis - not a restatement of the data. " +
           "Return ONLY valid JSON, no markdown fences: {" +

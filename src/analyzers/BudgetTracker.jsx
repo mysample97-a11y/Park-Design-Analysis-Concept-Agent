@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, AlertTriangle, Calculator, Plus, Trash2, Info } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
@@ -7,7 +7,7 @@ import {
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
-import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool } from "../utils/toolBridge";
+import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
@@ -77,6 +77,27 @@ export default function BudgetTracker() {
   // Token accounting. Read once on mount from localStorage so the figure
   // survives a reload - the whole point is to see spend accumulate across a
   // session, including after swapping in a different key.
+  /*
+    CANCELLATION.
+    fetch() has no default timeout, so a provider that accepts the connection
+    and never replies leaves the UI on "Researching..." forever - no error, no
+    failure, no way out. Requests now time out, and this lets the user stop one
+    immediately. Nothing already generated is discarded by cancelling.
+  */
+  const abortRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function newAbort() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* already done */ } }
+    abortRef.current = new AbortController();
+    setBusy(true);
+    return abortRef.current.signal;
+  }
+  function cancelRequest() {
+    if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    setBusy(false);
+  }
+  useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
+
   const [tokenUsage, setTokenUsage] = useState(() => getUsage("BDG"));
   const noteUsage = (u) => setTokenUsage(recordUsage("BDG", u));
   /*
@@ -118,13 +139,15 @@ export default function BudgetTracker() {
   useEffect(() => {
     setActiveTool("BDG", {
       calculate: calculateTokens,
-      resetUsage: () => setTokenUsage(resetUsage("BDG")),
+      cancel: cancelRequest,
+    resetUsage: () => setTokenUsage(resetUsage("BDG")),
       estimate: exactEstimate,
     });
     return () => clearActiveTool("BDG");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { setActiveEstimate("BDG", exactEstimate); }, [exactEstimate]);
+  useEffect(() => { setActiveBusy("BDG", busy); }, [busy]);
   // Publish progress so the Budget/Usage rail can show an unfinished report -
   // the rail is where a user is looking while a long run is in flight.
   useEffect(() => {
@@ -181,6 +204,7 @@ export default function BudgetTracker() {
       const scope = detectedConcepts.length > 1 ? detectedConcepts[0] : { label: "", text: pasteText };
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 2500,
         content:
           "Extract EVERY built facility or zone from this park programme. Do not summarise, do not merge similar " +
@@ -421,6 +445,7 @@ export default function BudgetTracker() {
       }));
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 3000,
         content:
           "These park concepts have ALREADY been costed - do not recost them. Compare on VALUE FOR MONEY, not " +
@@ -479,6 +504,7 @@ export default function BudgetTracker() {
       // most expensive call the tool makes. Leaving it out of the meter would
       // understate spend precisely where a user is most likely to run dry.
       onUsage: noteUsage,
+      abortSignal: newAbort(),
       provider, apiKey, maxTokens: 3000,
       content: [
         ...blocks,
@@ -510,6 +536,7 @@ export default function BudgetTracker() {
         setResearchError(`Researching rates ${start2 + 1}-${Math.min(start2 + CHUNK, named.length)} of ${named.length}...`);
         const text = await callAI({
           onUsage: noteUsage,
+      abortSignal: newAbort(),
           provider, apiKey, maxTokens: 2200, useWebSearch: true,
           onSources: (g) => {
             (g.sources || []).forEach((x) => sourcesSeen.push(x));
@@ -726,6 +753,7 @@ export default function BudgetTracker() {
                 done: chunkState.done, continuationSummary: chunkState.continuationSummary });
       const text = await callAI({
         onUsage: noteUsage,
+      abortSignal: newAbort(),
         provider, apiKey, maxTokens: 2500,
         content: "You are a cost-planning assistant reviewing a park redesign budget estimate built with a cascading wrapper method (RICS NRM1 style). Using ONLY the data given, provide: " +
           "(1) 'observations': array of short strings on where the biggest cost drivers are and any figures that look unusually high or low, " +
