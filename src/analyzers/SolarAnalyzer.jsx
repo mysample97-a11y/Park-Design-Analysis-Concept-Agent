@@ -96,6 +96,8 @@ function buildDayData(month, day, lat, lon, utcOffset) {
 export default function SolarAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
+  // Live handle on the current render's closures for the rails bridge.
+  const bridgeRef = useRef({});
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
   /*
@@ -115,6 +117,22 @@ export default function SolarAnalyzer() {
   }
   function cancelRequest() {
     if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    abortRef.current = null;
+    setBusy(false);
+  }
+  /*
+   * Clears the in-flight flag when a request finishes, however it finishes.
+   *
+   * It used to be cleared ONLY by cancelRequest(), so after a successful run
+   * `busy` stayed true forever: the Cancel button never disappeared and the rail
+   * reported a request permanently in flight.
+   *
+   * The controller identity is checked so a slow earlier request cannot clear
+   * the flag belonging to a newer one that is still running.
+   */
+  function endBusy(ctrl) {
+    if (ctrl && abortRef.current && ctrl !== abortRef.current) return;
+    abortRef.current = null;
     setBusy(false);
   }
   useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
@@ -182,9 +200,7 @@ export default function SolarAnalyzer() {
       }
     } catch {
       setExactEstimate(null);
-    } finally {
-      setCounting(false);
-    }
+    } finally { endBusy(); setCounting(false); }
   }
 
   // Publish this tool's estimator and reset to the rails. Registered on mount
@@ -196,7 +212,7 @@ export default function SolarAnalyzer() {
   // before this tool was opened is collected here too.
   useEffect(() => {
     registerToolState("SOL", {
-      snapshot: () => ({ location, siteInfo, preset, zones, insight, autoNote, overflowText, webSources, groundingNote, includeOverflow }),
+      snapshot: () => (bridgeRef.current.getState ? { ...bridgeRef.current.getState() } : {}),
       restore: (s) => {
         if (!s || typeof s !== "object") return;
       if (s.location !== undefined) setLocation(s.location);
@@ -230,8 +246,8 @@ export default function SolarAnalyzer() {
 
   useEffect(() => {
     setActiveTool("SOL", {
-      calculate: calculateTokens,
-      cancel: cancelRequest,
+      calculate: () => bridgeRef.current.calculate && bridgeRef.current.calculate(),
+      cancel: () => bridgeRef.current.cancel && bridgeRef.current.cancel(),
     resetUsage: () => setTokenUsage(resetUsage("SOL")),
       estimate: exactEstimate,
     });
@@ -273,7 +289,7 @@ export default function SolarAnalyzer() {
       setSiteInfo(parsed);
       autoSuggestZones(parsed);
     } catch (e) { setSiteError(e.message || "Could not resolve this location."); }
-    finally { setSiteLoading(false); }
+    finally { endBusy(); setSiteLoading(false); }
   }
 
   function addZone() { setZones([...zones, { id: uid(), name: "", shaded: [] }]); }
@@ -320,7 +336,7 @@ export default function SolarAnalyzer() {
       }
     } catch (e) {
       setAutoNote("Could not auto-propose zones for this location. You can add them manually below, or run the analysis without zones for a site-wide result.");
-    } finally { setAutoLoading(false); }
+    } finally { endBusy(); setAutoLoading(false); }
   }
 
   // Daily clear-sky insolation, integrated from the half-hourly GHI values.
@@ -475,7 +491,7 @@ export default function SolarAnalyzer() {
       const gaps = missingFields(parsedInsight, ["shade_strategy", "zone_recommendations", "conclusion"]);
       setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
-    finally { setInsightLoading(false); }
+    finally { endBusy(); setInsightLoading(false); }
   }
 
   function buildReportText() {
@@ -498,6 +514,22 @@ export default function SolarAnalyzer() {
   const [overflowText, setOverflowText] = useState("");
   const [webSources, setWebSources] = useState([]);
   const [groundingNote, setGroundingNote] = useState("");
+
+  /*
+    Assigned in an effect with NO dependency array: it runs after EVERY render,
+    and effects run after the component body completes. Assigning during render
+    instead threw "Cannot access X before initialization" for whichever state
+    happened to be declared below it.
+  */
+  useEffect(() => {
+        bridgeRef.current = {
+      // Lazy: evaluated when the bridge calls it, not during render, so it can
+      // safely reference state declared further down the component body.
+      getState: () => ({ location, siteInfo, preset, zones, insight, autoNote, overflowText, webSources, groundingNote, includeOverflow }),
+      calculate: calculateTokens,
+      cancel: typeof cancelRequest === "function" ? cancelRequest : null,
+    };
+  });
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -687,6 +719,18 @@ export default function SolarAnalyzer() {
                         ? "Regenerate AI Insight"
                         : "Continue insight generation"}
                 </button>
+                {busy && (
+                  <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
+                    Cancel
+                  </button>
+                )}
+                {busy && (
+                  <button type="button" data-plain onClick={cancelRequest}
+                    className="as2p-inline-cancel ml-2 text-xs px-3 py-2 rounded-md"
+                    title="Stop the request now. Anything already generated is kept.">
+                    Cancel request
+                  </button>
+                )}
                 {chunkState.done.length > 0 && !insightComplete && (
                   <button type="button" onClick={continueInsight} disabled={insightLoading}
                     className="btn-gold ml-2">

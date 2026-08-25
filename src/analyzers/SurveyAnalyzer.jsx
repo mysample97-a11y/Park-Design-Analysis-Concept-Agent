@@ -79,6 +79,8 @@ export default function SurveyAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
 
   const [raw, setRaw] = useState("");
+  // Live handle on the current render's closures for the rails bridge.
+  const bridgeRef = useRef({});
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
   /*
@@ -98,6 +100,22 @@ export default function SurveyAnalyzer() {
   }
   function cancelRequest() {
     if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    abortRef.current = null;
+    setBusy(false);
+  }
+  /*
+   * Clears the in-flight flag when a request finishes, however it finishes.
+   *
+   * It used to be cleared ONLY by cancelRequest(), so after a successful run
+   * `busy` stayed true forever: the Cancel button never disappeared and the rail
+   * reported a request permanently in flight.
+   *
+   * The controller identity is checked so a slow earlier request cannot clear
+   * the flag belonging to a newer one that is still running.
+   */
+  function endBusy(ctrl) {
+    if (ctrl && abortRef.current && ctrl !== abortRef.current) return;
+    abortRef.current = null;
     setBusy(false);
   }
   useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
@@ -140,7 +158,7 @@ export default function SurveyAnalyzer() {
       setExactEstimate(exact && exact.exact
         ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
-    } catch { setExactEstimate(null); } finally { setCounting(false); }
+    } catch { setExactEstimate(null); } finally { endBusy(); setCounting(false); }
   }
 
   // Publish this tool's estimator and reset to the rails. Registered on mount
@@ -152,7 +170,7 @@ export default function SurveyAnalyzer() {
   // before this tool was opened is collected here too.
   useEffect(() => {
     registerToolState("SUR", {
-      snapshot: () => ({ raw, parsed, analysis, overflowText, includeOverflow }),
+      snapshot: () => (bridgeRef.current.getState ? { ...bridgeRef.current.getState() } : {}),
       restore: (s) => {
         if (!s || typeof s !== "object") return;
       if (s.raw !== undefined) setRaw(s.raw);
@@ -176,8 +194,8 @@ export default function SurveyAnalyzer() {
 
   useEffect(() => {
     setActiveTool("SUR", {
-      calculate: calculateTokens,
-      cancel: cancelRequest,
+      calculate: () => bridgeRef.current.calculate && bridgeRef.current.calculate(),
+      cancel: () => bridgeRef.current.cancel && bridgeRef.current.cancel(),
     resetUsage: () => setTokenUsage(resetUsage("SUR")),
       estimate: exactEstimate,
     });
@@ -271,6 +289,7 @@ export default function SurveyAnalyzer() {
     } catch (err) {
       setParseError(friendlyError(err.message) + " (Technical: " + err.message + ")");
     } finally {
+      endBusy();
       setImageLoading(false); e.target.value = "";
     }
   }
@@ -347,6 +366,7 @@ export default function SurveyAnalyzer() {
     } catch (e) {
       setAnalysisError(e.message || "Unknown error while generating insight.");
     } finally {
+      endBusy();
       setAnalysisLoading(false);
     }
   }
@@ -376,6 +396,22 @@ export default function SurveyAnalyzer() {
 
   // --- Structured 11-section report export (see utils/reportTemplate.js) ---
   const [overflowText, setOverflowText] = useState("");
+
+  /*
+    Assigned in an effect with NO dependency array: it runs after EVERY render,
+    and effects run after the component body completes. Assigning during render
+    instead threw "Cannot access X before initialization" for whichever state
+    happened to be declared below it.
+  */
+  useEffect(() => {
+        bridgeRef.current = {
+      // Lazy: evaluated when the bridge calls it, not during render, so it can
+      // safely reference state declared further down the component body.
+      getState: () => ({ raw, parsed, analysis, overflowText, includeOverflow }),
+      calculate: calculateTokens,
+      cancel: typeof cancelRequest === "function" ? cancelRequest : null,
+    };
+  });
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -490,6 +526,18 @@ export default function SurveyAnalyzer() {
                 : insightComplete ? "Regenerate AI Insight"
                 : "Continue insight generation"}
             </button>
+            {busy && (
+              <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
+                Cancel
+              </button>
+            )}
+            {busy && (
+              <button type="button" data-plain onClick={cancelRequest}
+                className="as2p-inline-cancel ml-2 text-xs px-3 py-2 rounded-md"
+                title="Stop the request now. Anything already generated is kept.">
+                Cancel request
+              </button>
+            )}
             {chunkState.done.length > 0 && !insightComplete && (
               <button type="button" onClick={continueInsight} disabled={insightLoading}
                 className="btn-gold ml-2">

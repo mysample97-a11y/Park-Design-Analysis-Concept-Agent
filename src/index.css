@@ -613,3 +613,18 @@ input, textarea, select { color: #1C2333; }
 /* Card headers sat flush against their first line of content. */
 .as2p-tools-theme .card-header { padding-bottom: 0.6rem !important; }
 .as2p-tools-theme .card-header + * { padding-top: 0.75rem !important; }
+
+/* Inline Cancel sits beside the button that started the request, so a user does
+   not have to look across the page to stop it. Orange rather than blue: it is a
+   stop action, not a primary one. */
+.as2p-tools-theme .as2p-inline-cancel {
+  background-color: rgba(255, 138, 61, 0.14) !important;
+  background-image: none !important;
+  border: 1px solid #FF8A3D !important;
+  color: #FFE2CB !important;
+  box-shadow: none !important;
+  padding: 8px 12px !important;
+}
+.as2p-tools-theme .as2p-inline-cancel:hover {
+  background-color: rgba(255, 138, 61, 0.26) !important;
+}

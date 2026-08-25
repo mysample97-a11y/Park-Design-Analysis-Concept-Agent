@@ -39,6 +39,8 @@ const CONFIDENCE_COLOR = {
 
 export default function BudgetTracker() {
   const { provider, apiKey, meta } = useAppContext();
+  // Live handle on the current render's closures for the rails bridge.
+  const bridgeRef = useRef({});
   const [facilities, setFacilities] = useState([
     { id: uid(), name: "", area: "", rate: "" },
   ]);
@@ -94,6 +96,22 @@ export default function BudgetTracker() {
   }
   function cancelRequest() {
     if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    abortRef.current = null;
+    setBusy(false);
+  }
+  /*
+   * Clears the in-flight flag when a request finishes, however it finishes.
+   *
+   * It used to be cleared ONLY by cancelRequest(), so after a successful run
+   * `busy` stayed true forever: the Cancel button never disappeared and the rail
+   * reported a request permanently in flight.
+   *
+   * The controller identity is checked so a slow earlier request cannot clear
+   * the flag belonging to a newer one that is still running.
+   */
+  function endBusy(ctrl) {
+    if (ctrl && abortRef.current && ctrl !== abortRef.current) return;
+    abortRef.current = null;
     setBusy(false);
   }
   useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
@@ -138,7 +156,7 @@ export default function BudgetTracker() {
       setExactEstimate(exact && exact.exact
         ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
-    } catch { setExactEstimate(null); } finally { setCounting(false); }
+    } catch { setExactEstimate(null); } finally { endBusy(); setCounting(false); }
   }
 
   // Publish this tool's estimator and reset to the rails. Registered on mount
@@ -150,7 +168,7 @@ export default function BudgetTracker() {
   // before this tool was opened is collected here too.
   useEffect(() => {
     registerToolState("BDG", {
-      snapshot: () => ({ facilities, rates, pasteText, location, currency, researching, researchNote, budgetCap, detecting, conceptCount, insight, comparison, comparing, calculated, overflowText, webSources, groundingNote, includeOverflow }),
+      snapshot: () => (bridgeRef.current.getState ? { ...bridgeRef.current.getState() } : {}),
       restore: (s) => {
         if (!s || typeof s !== "object") return;
       if (s.facilities !== undefined) setFacilities(s.facilities);
@@ -200,8 +218,8 @@ export default function BudgetTracker() {
 
   useEffect(() => {
     setActiveTool("BDG", {
-      calculate: calculateTokens,
-      cancel: cancelRequest,
+      calculate: () => bridgeRef.current.calculate && bridgeRef.current.calculate(),
+      cancel: () => bridgeRef.current.cancel && bridgeRef.current.cancel(),
     resetUsage: () => setTokenUsage(resetUsage("BDG")),
       estimate: exactEstimate,
     });
@@ -291,9 +309,7 @@ export default function BudgetTracker() {
         (detectedConcepts.length > 1 ? " Other concepts are costed separately in the comparison below." : ""));
     } catch (e) {
       setDetectError(e.message || "Could not detect facilities. Try again or enter them manually.");
-    } finally {
-      setDetecting(false);
-    }
+    } finally { endBusy(); setDetecting(false); }
   }
 
   function splitConcepts(body) {
@@ -550,6 +566,7 @@ export default function BudgetTracker() {
     } catch (e) {
       setCompareError(friendlyError(e.message) || "Could not compare the concepts. Try again.");
     } finally {
+      endBusy();
       setComparing(false);
     }
   }
@@ -646,6 +663,7 @@ export default function BudgetTracker() {
     } catch (e) {
       setResearchError(friendlyError(e.message) || "Could not research rates. Enter them manually.");
     } finally {
+      endBusy();
       setResearching(false);
     }
   }
@@ -882,6 +900,7 @@ export default function BudgetTracker() {
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
+      endBusy();
       setInsightLoading(false);
     }
   }
@@ -904,6 +923,22 @@ export default function BudgetTracker() {
   const [overflowText, setOverflowText] = useState("");
   const [webSources, setWebSources] = useState([]);
   const [groundingNote, setGroundingNote] = useState("");
+
+  /*
+    Assigned in an effect with NO dependency array: it runs after EVERY render,
+    and effects run after the component body completes. Assigning during render
+    instead threw "Cannot access X before initialization" for whichever state
+    happened to be declared below it.
+  */
+  useEffect(() => {
+        bridgeRef.current = {
+      // Lazy: evaluated when the bridge calls it, not during render, so it can
+      // safely reference state declared further down the component body.
+      getState: () => ({ facilities, rates, pasteText, location, currency, researching, researchNote, budgetCap, detecting, conceptCount, insight, comparison, comparing, calculated, overflowText, webSources, groundingNote, includeOverflow }),
+      calculate: calculateTokens,
+      cancel: typeof cancelRequest === "function" ? cancelRequest : null,
+    };
+  });
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -1393,6 +1428,18 @@ export default function BudgetTracker() {
               : <Sparkles size={15} />}
             {insightLoading || comparing ? "Working - do not navigate away" : "Generate AI Insight"}
           </button>
+          {busy && (
+            <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
+              Cancel
+            </button>
+          )}
+          {busy && (
+            <button type="button" data-plain onClick={cancelRequest}
+              className="as2p-inline-cancel ml-2 text-xs px-3 py-2 rounded-md"
+              title="Stop the request now. Anything already generated is kept.">
+              Cancel request
+            </button>
+          )}
           {chunkState.done.length > 0 && !insightComplete && (
             <button type="button" onClick={continueInsight} disabled={insightLoading}
               className="btn-gold ml-2">

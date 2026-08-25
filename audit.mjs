@@ -85,7 +85,14 @@ check("Budget", "estimate has its own separate clear control",
   check("Budget", "every tool registers with the rails bridge", miss.length === 0, miss.join(", "));
 }
 check("Budget", "a hidden tool cannot overwrite the visible estimate",
-  /if \(active\.code !== code\) return;/.test(F.bridge));
+  // The guard used to be a single-slot check. The bridge now keeps a MAP keyed
+  // by tool code, so each tool writes only into its own entry and cross-tool
+  // clobbering is impossible by construction rather than by a guard clause.
+  /const tools = new Map\(\)/.test(F.bridge) && /entry\(code\)\.estimate = estimate/.test(F.bridge));
+check("Budget", "the visible tool is chosen by the tab, not by mount order",
+  // The original bug: every tool called setActiveTool on mount, so the LAST one
+  // mounted won and the rails showed its data instead of the current tool's.
+  /export function setActiveCode/.test(F.bridge) && /setActiveCode\(TAB_TOOL_CODE\[activeTab\]/.test(F.app));
 
 /* ---------------------------------------------------------------- 3. RESILIENCE */
 check("Resilience", "capacity failures get a longer, shorter-lived retry",
@@ -329,6 +336,60 @@ check("Theme", "header, main and settings share one padding rule",
     check("Imports", `${t}: every imported function it calls is imported`,
       missing.length === 0, missing.join(", "));
   }
+}
+
+
+/* ----------------------------------------- 14. STALE CLOSURE + BUSY LIFECYCLE */
+{
+  const miss = everyTool((src) => /bridgeRef\.current/.test(src));
+  check("Bridge", "handlers read a live ref, not a first-render closure", miss.length === 0, miss.join(", "));
+  // The tools expose a lazy getState() through the ref, not a `state` property.
+  // The assertion was checking for a shape that never existed - a false alarm,
+  // and the reason to always confirm a FAIL is real before touching the code.
+  const m2 = everyTool((src) => /snapshot: \(\) => \(bridgeRef\.current\.getState/.test(src));
+  check("Session", "the snapshot reads current state through a live ref", m2.length === 0, m2.join(", "));
+  const m3 = everyTool((src) => /function endBusy/.test(src));
+  check("Cancel", "busy is cleared when a request ENDS, not only when cancelled", m3.length === 0, m3.join(", "));
+  const m4 = everyTool((src) => /as2p-inline-cancel/.test(src));
+  check("Cancel", "an inline Cancel button sits beside the generate button", m4.length === 0, m4.join(", "));
+  // every finally that resets a loading flag must also clear busy
+  for (const t of TOOLS) {
+    const bad = (A[t].match(/finally\s*\{(?![^}]*endBusy)[^}]*set\w*Loading\(false\)/g) || []).length;
+    check("Cancel", `${t}: no request path leaves busy stuck on`, bad === 0, `${bad} uncovered`);
+  }
+}
+check("Session", "the session file carries tool inputs, not just storage",
+  /toolState: stripSecrets\(toolState\)/.test(F.session));
+check("Session", "save collects every mounted tool's state",
+  /snapshotAllTools\(\)/.test(F.rails));
+check("Session", "load pushes state back into the tools",
+  /restoreAllTools\(/.test(F.rails));
+check("Session", "state for an unopened tool is deferred, not discarded",
+  /takePendingState/.test(F.bridge));
+check("Budget", "the estimate reads real inputs, not empty chunk state",
+  !/const preview = JSON\.stringify\(chunkState\.sections \|\| \{\}\)/.test(Object.values(A).join("")));
+check("Resilience", "a bare timeout is classified as an abort, not raw text",
+  /abort\|timeout\|cancell\?ed/.test(F.ai));
+
+
+/* ------------------------------------------ 14. CANCEL REACHABILITY
+ * The Cancel control existed only in the Budget rail, off to the side. While a
+ * run is in flight the user is looking at the Generate button, so a cancel they
+ * cannot see is a cancel that does not exist.
+ */
+{
+  const a = TOOLS.filter((t) => !/onClick=\{cancelRequest\}/.test(A[t]));
+  check("Cancel", "every tool has an inline Cancel beside Generate", a.length === 0, a.join(", "));
+  const b = TOOLS.filter((t) => !/setActiveBusy\(/.test(A[t]));
+  check("Cancel", "every tool publishes its busy state to the rail", b.length === 0, b.join(", "));
+  check("Cancel", "the rail renders a Cancel while busy",
+    /busy && onCancel/.test(F.rails));
+  check("Cancel", "a stalled request cannot hang forever",
+    /REQUEST_TIMEOUT_MS/.test(F.ai) && /makeSignal\(abortSignal\)/.test(F.ai));
+  check("Cancel", "a pre-aborted signal throws instead of hanging",
+    /ALREADY-ABORTED SIGNALS MUST THROW/.test(F.ai));
+  check("Cancel", "a timeout is classified, not surfaced as a bare word",
+    /abort\|timeout\|cancell\?ed/.test(F.ai));
 }
 
 /* --------------------------------------------------------------------- OUTPUT */

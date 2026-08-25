@@ -44,6 +44,8 @@ const SECTIONS = [
 export default function CombinedDocumentGenerator() {
   const { provider, apiKey, meta } = useAppContext();
   const [inputs, setInputs] = useState(() => Object.fromEntries(SECTIONS.map((s) => [s.id, s.default])));
+  // Live handle on the current render's closures for the rails bridge.
+  const bridgeRef = useRef({});
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
   /*
@@ -63,6 +65,22 @@ export default function CombinedDocumentGenerator() {
   }
   function cancelRequest() {
     if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    abortRef.current = null;
+    setBusy(false);
+  }
+  /*
+   * Clears the in-flight flag when a request finishes, however it finishes.
+   *
+   * It used to be cleared ONLY by cancelRequest(), so after a successful run
+   * `busy` stayed true forever: the Cancel button never disappeared and the rail
+   * reported a request permanently in flight.
+   *
+   * The controller identity is checked so a slow earlier request cannot clear
+   * the flag belonging to a newer one that is still running.
+   */
+  function endBusy(ctrl) {
+    if (ctrl && abortRef.current && ctrl !== abortRef.current) return;
+    abortRef.current = null;
     setBusy(false);
   }
   useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
@@ -105,7 +123,7 @@ export default function CombinedDocumentGenerator() {
       setExactEstimate(exact && exact.exact
         ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
-    } catch { setExactEstimate(null); } finally { setCounting(false); }
+    } catch { setExactEstimate(null); } finally { endBusy(); setCounting(false); }
   }
 
   // Publish this tool's estimator and reset to the rails. Registered on mount
@@ -117,7 +135,7 @@ export default function CombinedDocumentGenerator() {
   // before this tool was opened is collected here too.
   useEffect(() => {
     registerToolState("CMB", {
-      snapshot: () => ({ inputs, pdfNotes, result, copied, projectLocation, gapCheck, overflowText, webSources, groundingNote, includeOverflow }),
+      snapshot: () => (bridgeRef.current.getState ? { ...bridgeRef.current.getState() } : {}),
       restore: (s) => {
         if (!s || typeof s !== "object") return;
       if (s.inputs !== undefined) setInputs(s.inputs);
@@ -151,8 +169,8 @@ export default function CombinedDocumentGenerator() {
 
   useEffect(() => {
     setActiveTool("CMB", {
-      calculate: calculateTokens,
-      cancel: cancelRequest,
+      calculate: () => bridgeRef.current.calculate && bridgeRef.current.calculate(),
+      cancel: () => bridgeRef.current.cancel && bridgeRef.current.cancel(),
     resetUsage: () => setTokenUsage(resetUsage("CMB")),
       estimate: exactEstimate,
     });
@@ -266,7 +284,7 @@ export default function CombinedDocumentGenerator() {
       setGapCheck(parsed);
     } catch (e) {
       setGapError(e.message || "Could not run the gap check.");
-    } finally { setGapLoading(false); }
+    } finally { endBusy(); setGapLoading(false); }
   }
 
   // Generate = start over. Continue = add the sections still missing.
@@ -345,6 +363,7 @@ export default function CombinedDocumentGenerator() {
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
     } finally {
+      endBusy();
       setLoading(false);
     }
   }
@@ -418,6 +437,22 @@ export default function CombinedDocumentGenerator() {
   const [overflowText, setOverflowText] = useState("");
   const [webSources, setWebSources] = useState([]);
   const [groundingNote, setGroundingNote] = useState("");
+
+  /*
+    Assigned in an effect with NO dependency array: it runs after EVERY render,
+    and effects run after the component body completes. Assigning during render
+    instead threw "Cannot access X before initialization" for whichever state
+    happened to be declared below it.
+  */
+  useEffect(() => {
+        bridgeRef.current = {
+      // Lazy: evaluated when the bridge calls it, not during render, so it can
+      // safely reference state declared further down the component body.
+      getState: () => ({ inputs, pdfNotes, result, copied, projectLocation, gapCheck, overflowText, webSources, groundingNote, includeOverflow }),
+      calculate: calculateTokens,
+      cancel: typeof cancelRequest === "function" ? cancelRequest : null,
+    };
+  });
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -550,6 +585,18 @@ export default function CombinedDocumentGenerator() {
           </div>
 
           <button onClick={startFreshInsight} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>
+          {busy && (
+            <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
+              Cancel
+            </button>
+          )}
+          {busy && (
+            <button type="button" data-plain onClick={cancelRequest}
+              className="as2p-inline-cancel ml-2 text-xs px-3 py-2 rounded-md"
+              title="Stop the request now. Anything already generated is kept.">
+              Cancel request
+            </button>
+          )}
           {chunkState.done.length > 0 && !insightComplete && (
             <button type="button" onClick={continueInsight} disabled={insightLoading}
               className="btn-gold ml-2">

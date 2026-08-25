@@ -56,6 +56,8 @@ function BubbleDiagram({ zones }) {
 export default function ConceptGenerator() {
   const { provider, apiKey, meta } = useAppContext();
   const [brief, setBrief] = useState("");
+  // Live handle on the current render's closures for the rails bridge.
+  const bridgeRef = useRef({});
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
   /*
@@ -75,6 +77,22 @@ export default function ConceptGenerator() {
   }
   function cancelRequest() {
     if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    abortRef.current = null;
+    setBusy(false);
+  }
+  /*
+   * Clears the in-flight flag when a request finishes, however it finishes.
+   *
+   * It used to be cleared ONLY by cancelRequest(), so after a successful run
+   * `busy` stayed true forever: the Cancel button never disappeared and the rail
+   * reported a request permanently in flight.
+   *
+   * The controller identity is checked so a slow earlier request cannot clear
+   * the flag belonging to a newer one that is still running.
+   */
+  function endBusy(ctrl) {
+    if (ctrl && abortRef.current && ctrl !== abortRef.current) return;
+    abortRef.current = null;
     setBusy(false);
   }
   useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
@@ -106,7 +124,7 @@ export default function ConceptGenerator() {
         ? { input: perCall * n, output: Math.ceil(2500 * 0.7) * n,
             total: (perCall + Math.ceil(2500 * 0.7)) * n, calls: n, exact: true }
         : { ...estimateRun({ userText: preview, maxTokens: 2500, calls: n }), exact: false });
-    } catch { setExactEstimate(null); } finally { setCounting(false); }
+    } catch { setExactEstimate(null); } finally { endBusy(); setCounting(false); }
   }
 
   // Publish this tool's estimator and reset to the rails. Registered on mount
@@ -118,7 +136,7 @@ export default function ConceptGenerator() {
   // before this tool was opened is collected here too.
   useEffect(() => {
     registerToolState("CPT", {
-      snapshot: () => ({ brief, briefFileNote, userIdeas, siteAreaM2, siteContext, numConcepts, concepts, recommendation, progress, locationCtx, projectLocation, overflowText, webSources, groundingNote, includeOverflow }),
+      snapshot: () => (bridgeRef.current.getState ? { ...bridgeRef.current.getState() } : {}),
       restore: (s) => {
         if (!s || typeof s !== "object") return;
       if (s.brief !== undefined) setBrief(s.brief);
@@ -162,8 +180,8 @@ export default function ConceptGenerator() {
 
   useEffect(() => {
     setActiveTool("CPT", {
-      calculate: calculateTokens,
-      cancel: cancelRequest,
+      calculate: () => bridgeRef.current.calculate && bridgeRef.current.calculate(),
+      cancel: () => bridgeRef.current.cancel && bridgeRef.current.cancel(),
     resetUsage: () => setTokenUsage(resetUsage("CPT")),
       estimate: exactEstimate,
     });
@@ -258,7 +276,7 @@ export default function ConceptGenerator() {
       setLocationCtx(JSON.stringify(parsed, null, 2));
     } catch (e) {
       setCtxError(e.message || "Could not research local context.");
-    } finally { setCtxLoading(false); }
+    } finally { endBusy(); setCtxLoading(false); }
   }
 
   async function generateConcepts() {
@@ -347,6 +365,7 @@ export default function ConceptGenerator() {
     } catch (e) {
       setError(e.message || "Something went wrong generating concepts. Try again.");
     } finally {
+      endBusy();
       setLoading(false);
     }
   }
@@ -393,6 +412,7 @@ export default function ConceptGenerator() {
     } catch (e) {
       setRecError(e.message || "Something went wrong. Try again.");
     } finally {
+      endBusy();
       setRecLoading(false);
     }
   }
@@ -428,6 +448,22 @@ export default function ConceptGenerator() {
   const [overflowText, setOverflowText] = useState("");
   const [webSources, setWebSources] = useState([]);
   const [groundingNote, setGroundingNote] = useState("");
+
+  /*
+    Assigned in an effect with NO dependency array: it runs after EVERY render,
+    and effects run after the component body completes. Assigning during render
+    instead threw "Cannot access X before initialization" for whichever state
+    happened to be declared below it.
+  */
+  useEffect(() => {
+        bridgeRef.current = {
+      // Lazy: evaluated when the bridge calls it, not during render, so it can
+      // safely reference state declared further down the component body.
+      getState: () => ({ brief, briefFileNote, userIdeas, siteAreaM2, siteContext, numConcepts, concepts, recommendation, progress, locationCtx, projectLocation, overflowText, webSources, groundingNote, includeOverflow }),
+      calculate: calculateTokens,
+      cancel: typeof cancelRequest === "function" ? cancelRequest : null,
+    };
+  });
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -612,6 +648,18 @@ export default function ConceptGenerator() {
               : <Sparkles size={18} />}
             {loading ? (progress || "Generating concepts...") : "Generate Concepts"}
           </button>
+          {busy && (
+            <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
+              Cancel
+            </button>
+          )}
+          {busy && (
+            <button type="button" data-plain onClick={cancelRequest}
+              className="as2p-inline-cancel ml-2 text-xs px-3 py-2 rounded-md"
+              title="Stop the request now. Anything already generated is kept.">
+              Cancel request
+            </button>
+          )}
           {loading && (
             <p className="text-[11px] text-brand-text mt-1">
               Each concept is generated in its own call so a long facility schedule cannot truncate the next one.

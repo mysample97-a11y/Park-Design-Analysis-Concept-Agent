@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import { getUsage } from "./utils/tokenMeter";
-import { subscribeActiveTool, setActiveEstimate } from "./utils/toolBridge";
+import { subscribeActiveTool, setActiveEstimate, setActiveCode } from "./utils/toolBridge";
 import { Home, MapPin, Sun, BarChart3, Wind, Leaf, Settings, Layers, Calculator, FileStack } from "lucide-react";
 import Landing from "./components/Landing";
 import TokenRails from "./components/TokenRails";
@@ -83,6 +83,10 @@ export default function App() {
   // and Reset buttons had nothing to call and never rendered at all.
   const [activeTool, setActiveToolState] = useState({ code: null, calculate: null, resetUsage: null, estimate: null });
   useEffect(() => subscribeActiveTool(setActiveToolState), []);
+  // Tell the bridge which tool is VISIBLE. Mount order cannot decide this: with
+  // keep-alive every visited tool stays mounted, so the last one mounted was
+  // winning and the rails showed its data instead of the current tool's.
+  useEffect(() => { setActiveCode(TAB_TOOL_CODE[activeTab] || null); }, [activeTab]);
   const [counting, setCounting] = useState(false);
   useEffect(() => {
     const code = TAB_TOOL_CODE[activeTab];

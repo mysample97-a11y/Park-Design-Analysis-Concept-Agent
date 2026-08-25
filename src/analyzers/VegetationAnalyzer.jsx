@@ -22,6 +22,8 @@ const MAX_IMAGES = 5;
 export default function VegetationAnalyzer() {
   const { provider, apiKey, meta } = useAppContext();
   const [location, setLocation] = useState("");
+  // Live handle on the current render's closures for the rails bridge.
+  const bridgeRef = useRef({});
   // Token accounting for this tool. Request limits are global; token
   // usage is reported per tool so you can see which one is expensive.
   /*
@@ -41,6 +43,22 @@ export default function VegetationAnalyzer() {
   }
   function cancelRequest() {
     if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } }
+    abortRef.current = null;
+    setBusy(false);
+  }
+  /*
+   * Clears the in-flight flag when a request finishes, however it finishes.
+   *
+   * It used to be cleared ONLY by cancelRequest(), so after a successful run
+   * `busy` stayed true forever: the Cancel button never disappeared and the rail
+   * reported a request permanently in flight.
+   *
+   * The controller identity is checked so a slow earlier request cannot clear
+   * the flag belonging to a newer one that is still running.
+   */
+  function endBusy(ctrl) {
+    if (ctrl && abortRef.current && ctrl !== abortRef.current) return;
+    abortRef.current = null;
     setBusy(false);
   }
   useEffect(() => () => { if (abortRef.current) { try { abortRef.current.abort(); } catch { /* ignore */ } } }, []);
@@ -86,7 +104,7 @@ export default function VegetationAnalyzer() {
       setExactEstimate(exact && exact.exact
         ? { input: exact.input, output: Math.ceil(2000 * 0.7), total: exact.input + Math.ceil(2000 * 0.7), calls: 1, exact: true }
         : { ...estimateRun({ userText: preview, maxTokens: 2000, calls: 1 }), exact: false });
-    } catch { setExactEstimate(null); } finally { setCounting(false); }
+    } catch { setExactEstimate(null); } finally { endBusy(); setCounting(false); }
   }
 
   // Publish this tool's estimator and reset to the rails. Registered on mount
@@ -98,7 +116,7 @@ export default function VegetationAnalyzer() {
   // before this tool was opened is collected here too.
   useEffect(() => {
     registerToolState("VEG", {
-      snapshot: () => ({ location, PLANT_PALETTE, researching, researchNote, terrainNote, photoNotes, waterFilter, siteContext, structuring, inventory, insight, overflowText, webSources, groundingNote, includeOverflow }),
+      snapshot: () => (bridgeRef.current.getState ? { ...bridgeRef.current.getState() } : {}),
       restore: (s) => {
         if (!s || typeof s !== "object") return;
       if (s.location !== undefined) setLocation(s.location);
@@ -142,8 +160,8 @@ export default function VegetationAnalyzer() {
 
   useEffect(() => {
     setActiveTool("VEG", {
-      calculate: calculateTokens,
-      cancel: cancelRequest,
+      calculate: () => bridgeRef.current.calculate && bridgeRef.current.calculate(),
+      cancel: () => bridgeRef.current.cancel && bridgeRef.current.cancel(),
     resetUsage: () => setTokenUsage(resetUsage("VEG")),
       estimate: exactEstimate,
     });
@@ -195,7 +213,7 @@ export default function VegetationAnalyzer() {
       setResearchNote(`Palette researched for: ${location}`);
     } catch (e) {
       setResearchError(e.message || "Could not research this location. The default palette remains in use.");
-    } finally { setResearching(false); }
+    } finally { endBusy(); setResearching(false); }
   }
 
 
@@ -231,9 +249,7 @@ export default function VegetationAnalyzer() {
       setInventory(JSON.parse(text.slice(start, end + 1)));
     } catch (e) {
       setStructureError(e.message || "Could not structure the notes. Try again.");
-    } finally {
-      setStructuring(false);
-    }
+    } finally { endBusy(); setStructuring(false); }
   }
 
   async function handleImageUpload(e) {
@@ -263,6 +279,7 @@ export default function VegetationAnalyzer() {
     } catch (err) {
       setImageError((imageError ? imageError + " " : "") + friendlyError(err.message) + " (Technical: " + err.message + ")");
     } finally {
+      endBusy();
       setImageLoading(false);
       e.target.value = "";
     }
@@ -341,6 +358,7 @@ export default function VegetationAnalyzer() {
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");
     } finally {
+      endBusy();
       setInsightLoading(false);
     }
   }
@@ -364,6 +382,22 @@ export default function VegetationAnalyzer() {
   const [overflowText, setOverflowText] = useState("");
   const [webSources, setWebSources] = useState([]);
   const [groundingNote, setGroundingNote] = useState("");
+
+  /*
+    Assigned in an effect with NO dependency array: it runs after EVERY render,
+    and effects run after the component body completes. Assigning during render
+    instead threw "Cannot access X before initialization" for whichever state
+    happened to be declared below it.
+  */
+  useEffect(() => {
+        bridgeRef.current = {
+      // Lazy: evaluated when the bridge calls it, not during render, so it can
+      // safely reference state declared further down the component body.
+      getState: () => ({ location, PLANT_PALETTE, researching, researchNote, terrainNote, photoNotes, waterFilter, siteContext, structuring, inventory, insight, overflowText, webSources, groundingNote, includeOverflow }),
+      calculate: calculateTokens,
+      cancel: typeof cancelRequest === "function" ? cancelRequest : null,
+    };
+  });
   const [includeOverflow, setIncludeOverflow] = useState(false);
   function structuredOpts() {
     return {
@@ -513,6 +547,18 @@ export default function VegetationAnalyzer() {
                 : insightComplete ? "Regenerate AI Insight"
                 : "Continue insight generation"}
             </button>
+            {busy && (
+              <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
+                Cancel
+              </button>
+            )}
+            {busy && (
+              <button type="button" data-plain onClick={cancelRequest}
+                className="as2p-inline-cancel ml-2 text-xs px-3 py-2 rounded-md"
+                title="Stop the request now. Anything already generated is kept.">
+                Cancel request
+              </button>
+            )}
             {chunkState.done.length > 0 && !insightComplete && (
               <button type="button" onClick={continueInsight} disabled={insightLoading}
                 className="btn-gold ml-2">

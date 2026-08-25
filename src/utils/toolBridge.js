@@ -16,97 +16,92 @@
 // hidden tool's estimator answer for the visible one.
 // ---------------------------------------------------------------------------
 
-let active = { code: null, calculate: null, resetUsage: null, estimate: null, partial: null };
+/*
+ * REGISTRY + ACTIVE POINTER  (rev 2)
+ *
+ * The first version kept ONE slot and every tool wrote into it on mount. With
+ * keep-alive every visited tool stays mounted, so the slot ended up holding
+ * whichever tool mounted LAST - not the one on screen. Every guarded update from
+ * the visible tool was then silently dropped, which is why the estimate showed a
+ * stale figure and the Cancel button never appeared.
+ *
+ * Now: a MAP keyed by tool code, plus an activeCode that App sets on every tab
+ * change. Each tool owns its own entry and cannot be clobbered by another.
+ */
+const tools = new Map();       // code -> { calculate, cancel, resetUsage, estimate, busy }
+let activeCode = null;
 const listeners = new Set();
 
+const EMPTY = { code: null, calculate: null, cancel: null, resetUsage: null, estimate: null, busy: false, partial: null };
+
+function entry(code) {
+  if (!tools.has(code)) {
+    tools.set(code, { code, calculate: null, cancel: null, resetUsage: null, estimate: null, busy: false, partial: null });
+  }
+  return tools.get(code);
+}
+
 function notify() {
-  listeners.forEach((fn) => {
-    try { fn(active); } catch { /* a bad listener must not break the app */ }
-  });
+  const snap = activeCode && tools.has(activeCode) ? { ...tools.get(activeCode) } : { ...EMPTY };
+  listeners.forEach((fn) => { try { fn(snap); } catch { /* a bad listener must not break the app */ } });
+}
+
+/** App calls this on every tab change. This - not mount order - decides who is visible. */
+export function setActiveCode(code) {
+  activeCode = code || null;
+  notify();
+}
+
+export function setActiveTool(code, handlers = {}) {
+  const e = entry(code);
+  if (typeof handlers.calculate === "function") e.calculate = handlers.calculate;
+  if (typeof handlers.cancel === "function") e.cancel = handlers.cancel;
+  if (typeof handlers.resetUsage === "function") e.resetUsage = handlers.resetUsage;
+  if (handlers.estimate !== undefined) e.estimate = handlers.estimate;
+  notify();
+}
+
+/** Writes into the tool's OWN entry - no cross-tool clobbering possible. */
+export function setActiveEstimate(code, estimate) {
+  entry(code).estimate = estimate;
+  notify();
+}
+
+export function setActiveBusy(code, busy, cancel) {
+  const e = entry(code);
+  e.busy = !!busy;
+  if (typeof cancel === "function") e.cancel = cancel;
+  notify();
 }
 
 /**
- * Called by a tool when it becomes the visible one.
- * @param {string} code        tool code, e.g. "WND"
- * @param {object} handlers    { calculate, resetUsage }
+ * Partial-generation progress, so the Usage rail can show "3 of 5 sections" and
+ * what is still outstanding. Per-tool, like everything else in this registry.
  */
-export function setActiveTool(code, handlers = {}) {
-  active = {
-    code,
-    calculate: typeof handlers.calculate === "function" ? handlers.calculate : null,
-    resetUsage: typeof handlers.resetUsage === "function" ? handlers.resetUsage : null,
-    estimate: handlers.estimate || null,
-    partial: handlers.partial || null,
-  };
-  notify();
-}
-
-/** Publishes a freshly computed estimate without re-registering the handlers. */
-export function setActiveEstimate(code, estimate) {
-  if (active.code !== code) return;      // a hidden tool must not overwrite
-  active = { ...active, estimate };
-  notify();
-}
-
-/** Publishes generation progress so the rail can show an incomplete report. */
 export function setActivePartial(code, partial) {
-  if (active.code !== code) return;
-  active = { ...active, partial };
+  entry(code).partial = partial || null;
   notify();
 }
 
 export function clearActiveTool(code) {
-  if (active.code !== code) return;
-  active = { code: null, calculate: null, resetUsage: null, estimate: null, partial: null };
+  tools.delete(code);
+  if (activeCode === code) activeCode = null;
   notify();
 }
 
 export function getActiveTool() {
-  return active;
+  return activeCode && tools.has(activeCode) ? { ...tools.get(activeCode) } : { ...EMPTY };
+}
+
+export function getActiveBusy() {
+  const a = getActiveTool();
+  return { busy: !!a.busy, cancel: a.cancel || null };
 }
 
 export function subscribeActiveTool(fn) {
   listeners.add(fn);
-  fn(active);
+  fn(getActiveTool());
   return () => listeners.delete(fn);
-}
-
-export default { setActiveTool, setActiveEstimate, setActiveBusy, setActivePartial, clearActiveTool, getActiveTool, subscribeActiveTool };
-
-/* ===========================================================================
- * BUSY STATE AND CANCELLATION
- *
- * Reported problem: "Researching..." sat there for minutes with no error and no
- * way out. Two separate faults behind that:
- *
- *   1. NO TIMEOUT. fetch() waits indefinitely by default. If a provider accepts
- *      the connection and then stalls, the promise never settles, no catch runs,
- *      and the spinner spins forever. Silence is indistinguishable from work.
- *   2. NO WAY TO STOP. Even knowing it was stuck, the only exit was reloading
- *      the page, which loses everything not yet persisted.
- *
- * The tool publishes its busy state and an abort function here; the rails render
- * a Stop button while it is set. Cancelling aborts the in-flight request, so the
- * connection is actually closed rather than merely ignored.
- * ========================================================================= */
-
-/**
- * @param {string} code   tool code
- * @param {boolean} busy  is a request in flight
- * @param {Function} [cancel] aborts it
- */
-export function setActiveBusy(code, busy, cancel) {
-  if (active.code !== code) return;          // a hidden tool must not speak for the visible one
-  active = {
-    ...active,
-    busy: !!busy,
-    cancel: typeof cancel === "function" ? cancel : (busy ? active.cancel : null),
-  };
-  notify();
-}
-
-export function getActiveBusy() {
-  return { busy: !!active.busy, cancel: active.cancel || null };
 }
 
 /* ===========================================================================
