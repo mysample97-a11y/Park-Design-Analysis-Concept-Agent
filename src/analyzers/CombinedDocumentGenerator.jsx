@@ -198,6 +198,23 @@ export default function CombinedDocumentGenerator() {
     } finally { setGapLoading(false); }
   }
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("CMB");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateConsolidated();
+
+  }
+
+  function continueInsight() { generateConsolidated(); }
+
+
   async function generateConsolidated() {
     const filled = SECTIONS.filter((s) => inputs[s.id]?.trim()).length;
     if (filled < 3) { setError("Fill in at least 3 sections before consolidating."); return; }
@@ -460,7 +477,13 @@ export default function CombinedDocumentGenerator() {
             )}
           </div>
 
-          <button onClick={generateConsolidated} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>
+          <button onClick={startFreshInsight} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>
+          {chunkState.done.length > 0 && !insightComplete && (
+            <button type="button" onClick={continueInsight} disabled={insightLoading}
+              className="btn-gold ml-2">
+              {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+            </button>
+          )}
           {chunkState.done.length > 0 && !insightComplete && (
             <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
               <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}

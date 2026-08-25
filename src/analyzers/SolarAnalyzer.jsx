@@ -305,6 +305,23 @@ export default function SolarAnalyzer() {
 
   function exposedHours(zone) { return dayData.filter((row) => row.tier.label !== "Low" && !zone.shaded.includes(row.compass)); }
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("SOL");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateInsight();
+
+  }
+
+  function continueInsight() { generateInsight(); }
+
+
   async function generateInsight() {
     if (!siteInfo) { setInsightError("Set a project location above first."); return; }
     setInsightLoading(true); setInsightWarning(""); setInsight(null); setInsightError("");
@@ -597,7 +614,7 @@ export default function SolarAnalyzer() {
             <div className="p-4">
               <div className="flex items-center mb-2 flex-wrap gap-4">
                 <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
-                <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
+                <button onClick={startFreshInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
                   {insightLoading
                     ? (chunkState.done.length ? "Continuing..." : "Generating...")
                     : chunkState.done.length === 0
@@ -606,6 +623,12 @@ export default function SolarAnalyzer() {
                         ? "Regenerate AI Insight"
                         : "Continue insight generation"}
                 </button>
+                {chunkState.done.length > 0 && !insightComplete && (
+                  <button type="button" onClick={continueInsight} disabled={insightLoading}
+                    className="btn-gold ml-2">
+                    {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+                  </button>
+                )}
                 {chunkState.done.length > 0 && !insightComplete && (
                   <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
                     <strong>{chunkProgress.text}</strong>{" "}

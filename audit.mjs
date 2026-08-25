@@ -118,7 +118,9 @@ check("Resilience", "the Gemini model default is pinned, not an alias",
 check("Continuation", "Concept Generator's own per-concept retry is documented as the reason it is excluded",
   /ONE AT A TIME/.test(A.ConceptGenerator));
 check("Continuation", "merge refuses to overwrite longer content with shorter",
-  /text\.length < existing\.length/.test(F.chunked));
+  // Was `text.length < existing.length` - string-only, and dropping arrays was
+  // what blanked the page. Now compares content VOLUME across any value type.
+  /volume\(next\.sections\[k\]\) > vol/.test(F.chunked));
 check("Continuation", "a false completion claim is rejected",
   /Trust our own record/.test(F.chunked));
 
@@ -244,6 +246,32 @@ for (const t of TOOLS) {
     check("Integrity", `${t}: referenced variable \`${v}\` is declared`, declared);
   }
 }
+
+
+/* ------------------------------------------------- 11. THIS PASS'S FIXES */
+check("Crash", "merged sections keep arrays and objects (the blank-page cause)",
+  /const volume = \(v\) =>/.test(F.chunked) && !/typeof incoming\[k\] === "string" \? incoming\[k\]\.trim\(\) : ""/.test(F.chunked));
+check("Crash", "size comparison uses content volume, not string length",
+  /volume\(next\.sections\[k\]\) > vol/.test(F.chunked));
+check("Crash", "an error boundary wraps every tool",
+  /ToolErrorBoundary/.test(F.app) && fs.existsSync("src/components/ToolErrorBoundary.jsx"));
+check("Crash", "the boundary tells the user nothing was lost",
+  /Nothing generated has been lost/.test(read("src/components/ToolErrorBoundary.jsx")));
+{
+  const expect = TOOLS.filter((t) => t !== "ConceptGenerator");
+  const a = expect.filter((t) => !/function startFreshInsight/.test(A[t]));
+  check("Continuation", "Generate always starts fresh", a.length === 0, a.join(", "));
+  const b = expect.filter((t) => !/onClick=\{continueInsight\}/.test(A[t]));
+  check("Continuation", "a separate Continue button exists", b.length === 0, b.join(", "));
+  const c = expect.filter((t) => !/onClick=\{startFreshInsight\}/.test(A[t]));
+  check("Continuation", "Generate is wired to the fresh-start handler", c.length === 0, c.join(", "));
+}
+check("Theme", "neon styling matches by element, so inline-styled buttons are caught",
+  /\.as2p-tools-theme button:not\(\.btn-outline\)/.test(F.css));
+check("Theme", "rails keep their own button styling",
+  /\.as2p-rail-stack button/.test(F.css));
+check("Theme", "header, main and settings share one padding rule",
+  /\.as2p-shell > div:not\(\.as2p-rail-stack\) \{\s*\n?\s*padding-left/.test(F.css));
 
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];

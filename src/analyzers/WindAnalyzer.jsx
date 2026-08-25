@@ -198,6 +198,23 @@ export default function WindAnalyzer() {
     return { label: "Protected - screening in place", color: "#4DD091" };
   }
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("WND");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateInsight();
+
+  }
+
+  function continueInsight() { generateInsight(); }
+
+
   async function generateInsight() {
     setInsightLoading(true); setInsightWarning(""); setInsight(null); setInsightError("");
     const summary = {
@@ -454,9 +471,15 @@ export default function WindAnalyzer() {
         <div className="p-4">
           <div className="flex items-center mb-2 flex-wrap gap-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
-            <button onClick={generateInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
+            <button onClick={startFreshInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <button type="button" onClick={continueInsight} disabled={insightLoading}
+                className="btn-gold ml-2">
+                {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+              </button>
+            )}
             {chunkState.done.length > 0 && !insightComplete && (
               <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
                 <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}

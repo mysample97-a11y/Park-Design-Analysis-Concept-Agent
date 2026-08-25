@@ -186,6 +186,23 @@ export default function VegetationAnalyzer() {
     }
   }
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("VEG");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateInsight();
+
+  }
+
+  function continueInsight() { generateInsight(); }
+
+
   async function generateInsight() {
     setInsightLoading(true); setInsightWarning(""); setInsight(null); setInsightError("");
     const summary = {
@@ -408,11 +425,17 @@ export default function VegetationAnalyzer() {
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">Step 2 — AI Insight & Recommendation</h2>
               <p className="text-[10px] text-brand-text/60">Uses your site context + terrain/soil data + reference palette to suggest what actually fits this site.</p>
             </div>
-            <button onClick={generateInsight} disabled={insightLoading || !apiKey} className="btn-dark">
+            <button onClick={startFreshInsight} disabled={insightLoading || !apiKey} className="btn-dark">
               {chunkState.done.length === 0 ? "Generate AI Insight"
                 : insightComplete ? "Regenerate AI Insight"
                 : "Continue insight generation"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <button type="button" onClick={continueInsight} disabled={insightLoading}
+                className="btn-gold ml-2">
+                {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+              </button>
+            )}
             {chunkState.done.length > 0 && !insightComplete && (
               <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
                 <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}

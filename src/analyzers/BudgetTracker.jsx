@@ -679,6 +679,23 @@ export default function BudgetTracker() {
     }
   })();
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("BDG");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateInsight();
+
+  }
+
+  function continueInsight() { generateInsight(); }
+
+
   async function generateInsight() {
     // STEP 3 - INSIGHT. One AI call. It does NOT re-run the comparison; that is
     // a separate, explicit button. Chaining them here meant a single press could
@@ -1279,13 +1296,19 @@ export default function BudgetTracker() {
       <div className="card p-4">
         <div className="flex items-center mb-2 flex-wrap gap-4">
           <h3 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h3>
-          <button onClick={generateInsight} disabled={insightLoading || comparing || !apiKey}
+          <button onClick={startFreshInsight} disabled={insightLoading || comparing || !apiKey}
             className="btn-dark disabled:opacity-60 disabled:cursor-not-allowed">
             {insightLoading || comparing
               ? <span className="inline-block w-[15px] h-[15px] border-2 border-white/30 border-t-white rounded-full animate-spin" />
               : <Sparkles size={15} />}
             {insightLoading || comparing ? "Working - do not navigate away" : "Generate AI Insight"}
           </button>
+          {chunkState.done.length > 0 && !insightComplete && (
+            <button type="button" onClick={continueInsight} disabled={insightLoading}
+              className="btn-gold ml-2">
+              {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+            </button>
+          )}
           {chunkState.done.length > 0 && !insightComplete && (
             <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
               <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}

@@ -409,8 +409,10 @@ input, textarea, select { color: #1C2333; }
 .as2p-shell > header,
 .as2p-shell > main,
 .as2p-shell > div:not(.as2p-rail-stack) {
-  margin-left: 262px;
-  margin-right: 24px;
+  /* rails end at 14 + 238 = 252px; 12px clearance puts content flush
+     against them with no dead gutter. */
+  margin-left: 264px;
+  margin-right: 20px;
 }
 /* .as2p-wide only removes Tailwind's max-width/centring. It must NOT zero the
    margins: <main> carries both the shell rule (262px) and this class, and an
@@ -502,10 +504,63 @@ input, textarea, select { color: #1C2333; }
 
 /* Header inner container aligns with the tool column's inner padding, so the
    title, the tab strip and the cards below all share one left edge. */
-.as2p-shell > header { padding-left: 1rem !important; padding-right: 1rem !important; }
-.as2p-shell > main   { padding-left: 1rem !important; padding-right: 1rem !important; }
+/* Header, main and the settings panel share identical inner padding so their
+   left edges line up exactly. */
+.as2p-shell > header,
+.as2p-shell > main,
+.as2p-shell > div:not(.as2p-rail-stack) {
+  padding-left: 0.75rem !important; padding-right: 0.75rem !important;
+}
 @media (min-width: 640px) {
   .as2p-shell > header,
-  .as2p-shell > main { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+  .as2p-shell > main,
+  .as2p-shell > div:not(.as2p-rail-stack) { padding-left: 1rem !important; padding-right: 1rem !important; }
 }
 .as2p-shell > header > div { max-width: none !important; margin-left: 0 !important; }
+
+/* ---------------------------------------------------------------------------
+   NEON BUTTONS EVERYWHERE  (item 2)
+
+   The .btn-dark / .btn-gold rules only reached tools that use those classes.
+   Site Context and others style buttons with INLINE style objects, which no
+   stylesheet can override - so those tools kept flat solid fills while Wind
+   looked correct. Matching on the element catches every button regardless of
+   how it was styled, and `!important` beats the inline background.
+
+   Excluded: buttons inside the rails, which have their own deliberate styling.
+--------------------------------------------------------------------------- */
+.as2p-tools-theme button:not(.btn-outline):not([data-plain]) {
+  background-image: linear-gradient(180deg, #21456F 0%, #16304F 100%) !important;
+  border: 1px solid #4DA3FF !important;
+  color: #EAF3FF !important;
+  box-shadow: 0 0 0 1px rgba(77,163,255,.18), 0 0 12px rgba(77,163,255,.24);
+}
+.as2p-tools-theme .btn-gold,
+.as2p-tools-theme button[class*="btn-gold"] {
+  background-image: linear-gradient(180deg, #5A3416 0%, #3E230E 100%) !important;
+  border: 1px solid #FF8A3D !important;
+  color: #FFE2CB !important;
+  box-shadow: 0 0 0 1px rgba(255,138,61,.18), 0 0 12px rgba(255,138,61,.26);
+}
+.as2p-tools-theme .btn-outline,
+.as2p-tools-theme button[class*="btn-outline"] {
+  background-image: none !important;
+  background-color: #101825 !important;
+  border: 1px solid #33517A !important;
+  color: #D7E5F7 !important;
+  box-shadow: none;
+}
+/* Small inline text actions (underlined "discard", tab strips) must stay plain. */
+.as2p-tools-theme button[class*="underline"],
+.as2p-tools-theme button[class*="text-xs"][class*="text-brand-muted"] {
+  background-image: none !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #93A6BC !important;
+}
+/* The rails style themselves. */
+.as2p-rail-stack button {
+  background-image: none !important;
+  box-shadow: none !important;
+}

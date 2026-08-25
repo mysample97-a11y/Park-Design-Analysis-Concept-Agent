@@ -215,6 +215,23 @@ export default function SurveyAnalyzer() {
     }
   }
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("SUR");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateAnalysis();
+
+  }
+
+  function continueInsight() { generateAnalysis(); }
+
+
   async function generateAnalysis() {
     if (!parsed) return;
     setAnalysisLoading(true); setAnalysis(null); setAnalysisError("");
@@ -407,11 +424,17 @@ export default function SurveyAnalyzer() {
               <span className="font-semibold">{parsed.responseCount}</span> response{parsed.responseCount !== 1 ? "s" : ""} parsed
               {parsed.responseCount < 20 && <span className="text-brand-warning"> - small sample, treat patterns as indicative</span>}
             </p>
-            <button onClick={generateAnalysis} disabled={analysisLoading || !apiKey} className="btn-dark">
+            <button onClick={startFreshInsight} disabled={analysisLoading || !apiKey} className="btn-dark">
               {chunkState.done.length === 0 ? "Generate AI Insight"
                 : insightComplete ? "Regenerate AI Insight"
                 : "Continue insight generation"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <button type="button" onClick={continueInsight} disabled={insightLoading}
+                className="btn-gold ml-2">
+                {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+              </button>
+            )}
             {chunkState.done.length > 0 && !insightComplete && (
               <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
                 <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}

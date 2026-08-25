@@ -349,7 +349,12 @@ export default function App() {
             {TOOL_PANELS.map(({ id, Component }) =>
               visitedTabs.has(id) ? (
                 <div key={id} style={{ display: activeTab === id ? "block" : "none" }}>
-                  <Component />
+                  {/* Confines a render error to the tool that threw. Without this
+                      one bad value blanks the whole page and every mounted tool
+                      loses its state. */}
+                  <ToolErrorBoundary toolName={id}>
+                    <Component />
+                  </ToolErrorBoundary>
                 </div>
               ) : null
             )}

@@ -122,20 +122,43 @@ export function mergeChunk(state, reply, topics) {
   const incoming = reply.sections && typeof reply.sections === "object" ? reply.sections : {};
   const validKeys = new Set(topics.map((t) => t.key));
 
+  /*
+   * VALUES MAY BE ANY SHAPE - THIS IS LOAD-BEARING.
+   *
+   * An earlier version accepted only strings and silently dropped everything
+   * else. Most sections in these tools are ARRAYS (zone_recommendations,
+   * suggested_species, observations...). So on the FIRST call those arrays were
+   * discarded, and on the SECOND call `setInsight({ ...parsed, ...merged })`
+   * produced an object missing them entirely. The report renderer then called
+   * .map() on undefined and the whole page went blank - which is exactly the
+   * crash reported when pressing Generate a second time to continue.
+   *
+   * Size is therefore measured by CONTENT VOLUME, not string length, so the
+   * "never replace something bigger with something smaller" rule still holds
+   * for arrays and objects.
+   */
+  const volume = (v) => {
+    if (v == null) return 0;
+    if (typeof v === "string") return v.trim().length;
+    if (Array.isArray(v)) return v.length ? JSON.stringify(v).length : 0;
+    if (typeof v === "object") return Object.keys(v).length ? JSON.stringify(v).length : 0;
+    return String(v).length;
+  };
+
   Object.keys(incoming).forEach((k) => {
     if (!validKeys.has(k)) return;                       // ignore invented keys
-    const text = typeof incoming[k] === "string" ? incoming[k].trim() : "";
-    if (!text) return;                                   // I3: never store empty
-    const existing = (next.sections[k] || "").trim();
+    const value = typeof incoming[k] === "string" ? incoming[k].trim() : incoming[k];
+    const vol = volume(value);
+    if (!vol) return;                                    // I3: never store empty
     // I3: a continuation must not degrade content already held.
-    if (existing && text.length < existing.length) return;
-    next.sections[k] = text;
+    if (volume(next.sections[k]) > vol) return;
+    next.sections[k] = value;
     if (!next.done.includes(k)) next.done.push(k);
   });
 
   // Trust our own record of what exists over the model's self-report: a model
   // can claim completion for a section it did not actually return.
-  next.done = topics.map((t) => t.key).filter((k) => (next.sections[k] || "").trim().length > 0);
+  next.done = topics.map((t) => t.key).filter((k) => volume(next.sections[k]) > 0);
   next.remaining = topics.map((t) => t.key).filter((k) => !next.done.includes(k));
 
   if (typeof reply.continuation_summary === "string" && reply.continuation_summary.trim()) {
@@ -157,23 +180,26 @@ export function mergeChunk(state, reply, topics) {
  * time. If a tool ever starts iterating, use this rather than Object.keys().
  */
 export function assembleSections(state, topics) {
+  const has = (v) => v != null && (typeof v === "string" ? v.trim().length : (Array.isArray(v) ? v.length : (typeof v === "object" ? Object.keys(v).length : String(v).length)));
   return topics
-    .filter((t) => (state.sections[t.key] || "").trim())
-    .map((t) => ({ key: t.key, label: t.label, text: state.sections[t.key].trim() }));
+    .filter((t) => has(state.sections[t.key]))
+    .map((t) => ({ key: t.key, label: t.label, text: state.sections[t.key] }));
 }
 
 export function isComplete(state, topics) {
-  return topics.every((t) => (state.sections[t.key] || "").trim().length > 0);
+  const has = (v) => v != null && (typeof v === "string" ? v.trim().length : (Array.isArray(v) ? v.length : (typeof v === "object" ? Object.keys(v).length : 1)));
+  return topics.every((t) => has(state.sections[t.key]));
 }
 
 export function progressLabel(state, topics) {
   const total = topics.length;
-  const doneCount = topics.filter((t) => (state.sections[t.key] || "").trim()).length;
+  const has = (v) => v != null && (typeof v === "string" ? v.trim().length : (Array.isArray(v) ? v.length : (typeof v === "object" ? Object.keys(v).length : 1)));
+  const doneCount = topics.filter((t) => has(state.sections[t.key])).length;
   return {
     doneCount, total,
     complete: doneCount === total,
-    doneLabels: topics.filter((t) => (state.sections[t.key] || "").trim()).map((t) => t.label),
-    remainingLabels: topics.filter((t) => !(state.sections[t.key] || "").trim()).map((t) => t.label),
+    doneLabels: topics.filter((t) => has(state.sections[t.key])).map((t) => t.label),
+    remainingLabels: topics.filter((t) => !has(state.sections[t.key])).map((t) => t.label),
     text: doneCount === total
       ? `All ${total} sections generated.`
       : `${doneCount} of ${total} sections generated.`,
@@ -199,7 +225,8 @@ export function loadPartial(toolCode, topics) {
     if (!p || typeof p !== "object" || !p.sections) return null;
     // Re-derive done/remaining from actual content rather than trusting the
     // stored lists, which may predate a change to the topic set.
-    const done = topics.map((t) => t.key).filter((k) => (p.sections[k] || "").trim());
+    const hasV = (v) => v != null && (typeof v === "string" ? v.trim().length : (Array.isArray(v) ? v.length : (typeof v === "object" ? Object.keys(v).length : 1)));
+    const done = topics.map((t) => t.key).filter((k) => hasV(p.sections[k]));
     return {
       sections: p.sections,
       done,

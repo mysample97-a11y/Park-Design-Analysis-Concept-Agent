@@ -241,6 +241,23 @@ export default function SiteContextAnalyzer() {
     return { status: "review", label: issues.join("; ") };
   }
 
+  // Generate = start over. Continue = add the sections still missing.
+
+  // One button doing both meant there was no way to restart cleanly.
+
+  function startFreshInsight() {
+
+    clearPartial("SCX");
+
+    setChunkState(emptyState(INSIGHT_TOPICS));
+
+    generateInsight();
+
+  }
+
+  function continueInsight() { generateInsight(); }
+
+
   async function generateInsight() {
     if (!context) { setInsightError("Run 'Analyze Site Context' above first - this insight builds on that analysis."); return; }
     setInsightLoading(true); setInsight(null); setInsightError(""); setInsightWarning("");
@@ -606,9 +623,15 @@ export default function SiteContextAnalyzer() {
         <div className="bg-white rounded-lg border-2 border-[#E8E2D5] p-4">
           <div className="flex items-center mb-2 flex-wrap gap-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445]">Step 2 - AI Insight & Recommendation</h2>
-            <button onClick={generateInsight} disabled={insightLoading} title={chunkState.done.length && !insightComplete ? "Continue generating the remaining sections" : undefined} style={BTN_DARK} className="text-sm font-bold px-4 py-2.5 rounded-md flex items-center gap-2 disabled:opacity-40 shadow-md">
+            <button onClick={startFreshInsight} disabled={insightLoading} title={chunkState.done.length && !insightComplete ? "Continue generating the remaining sections" : undefined} style={BTN_DARK} className="text-sm font-bold px-4 py-2.5 rounded-md flex items-center gap-2 disabled:opacity-40 shadow-md">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>
+            {chunkState.done.length > 0 && !insightComplete && (
+              <button type="button" onClick={continueInsight} disabled={insightLoading}
+                className="btn-gold ml-2">
+                {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+              </button>
+            )}
             {chunkState.done.length > 0 && !insightComplete && (
               <div className="mt-2 text-xs bg-[#FBF3E4] border border-[#E4D2A8] text-[#7A5B18] rounded p-2">
                 <strong>{chunkProgress.text}</strong>{" "}Generated: {chunkProgress.doneLabels.join(", ")}.{" "}
