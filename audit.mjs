@@ -385,7 +385,14 @@ check("Resilience", "a bare timeout is classified as an abort, not raw text",
   check("Cancel", "the rail renders a Cancel while busy",
     /busy && onCancel/.test(F.rails));
   check("Cancel", "a stalled request cannot hang forever",
-    /REQUEST_TIMEOUT_MS/.test(F.ai) && /makeSignal\(abortSignal\)/.test(F.ai));
+    /REQUEST_TIMEOUT_MS/.test(F.ai) && /makeSignal\(abortSignal, timeoutFor\(opts\)\)/.test(F.ai));
+  check("Cancel", "timeouts are generous enough not to kill a slow model",
+    // 90s was set from guesswork and fired on ordinary runs with grounding OFF.
+    /REQUEST_TIMEOUT_MS = 240000/.test(F.ai) && /RESEARCH_TIMEOUT_MS = 300000/.test(F.ai));
+  check("Cancel", "grounded research gets the longer budget",
+    /opts\.useWebSearch \? RESEARCH_TIMEOUT_MS : REQUEST_TIMEOUT_MS/.test(F.ai));
+  check("Budget", "the request count explains itself",
+    /recordRequestReason/.test(F.ai) && /recentRequestReasons/.test(F.rails));
   check("Cancel", "a pre-aborted signal throws instead of hanging",
     /ALREADY-ABORTED SIGNALS MUST THROW/.test(F.ai));
   check("Cancel", "a timeout is classified, not surfaced as a bare word",
