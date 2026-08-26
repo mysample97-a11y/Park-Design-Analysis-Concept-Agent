@@ -124,7 +124,7 @@ export default function SiteContextAnalyzer() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify({ location, siteArea, description }).slice(0, 20000);
+      const preview = JSON.stringify({ location, siteArea, siteDescription }).slice(0, 20000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "site context system instruction and methodology checklist", userText: preview });
       setExactEstimate(exact && exact.exact

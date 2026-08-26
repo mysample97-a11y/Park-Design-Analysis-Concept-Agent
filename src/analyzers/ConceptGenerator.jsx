@@ -114,7 +114,7 @@ export default function ConceptGenerator() {
   async function calculateTokens() {
     setCounting(true);
     try {
-      const preview = JSON.stringify({ projectLocation, siteArea, numConcepts }).slice(0, 20000);
+      const preview = JSON.stringify({ projectLocation, siteAreaM2, numConcepts }).slice(0, 20000);
       const exact = await countTokensExact({ provider, apiKey, model: undefined,
         systemText: "concept generator system instruction and methodology checklist", userText: preview });
       // Cost scales with the number of concepts requested, so the estimate must too.

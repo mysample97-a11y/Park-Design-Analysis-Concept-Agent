@@ -385,7 +385,10 @@ check("Resilience", "a bare timeout is classified as an abort, not raw text",
   check("Cancel", "the rail renders a Cancel while busy",
     /busy && onCancel/.test(F.rails));
   check("Cancel", "a stalled request cannot hang forever",
-    /REQUEST_TIMEOUT_MS/.test(F.ai) && /makeSignal\(abortSignal, timeoutFor\(opts\)\)/.test(F.ai));
+    // The timeout is now passed as an explicit parameter: `opts` exists only in
+    // callAI, and referencing it inside the provider functions threw
+    // "opts is not defined" on every call.
+    /REQUEST_TIMEOUT_MS/.test(F.ai) && /makeSignal\(abortSignal, timeoutMs \|\| timeoutFor\(\{ useWebSearch \}\)\)/.test(F.ai));
   check("Cancel", "timeouts are generous enough not to kill a slow model",
     // 90s was set from guesswork and fired on ordinary runs with grounding OFF.
     /REQUEST_TIMEOUT_MS = 240000/.test(F.ai) && /RESEARCH_TIMEOUT_MS = 300000/.test(F.ai));
@@ -398,6 +401,21 @@ check("Resilience", "a bare timeout is classified as an abort, not raw text",
   check("Cancel", "a timeout is classified, not surfaced as a bare word",
     /abort\|timeout\|cancell\?ed/.test(F.ai));
 }
+
+
+/* ------------------------------------------- 15. LINT GATE
+ * ESLint no-undef is the only layer that catches an undefined identifier. The
+ * build resolves modules and checks syntax; it does not check scope. Six real
+ * crashes were found the first time it ran.
+ */
+check("Lint", "a lint gate exists in package.json",
+  /"lint":\s*"eslint src"/.test(read("package.json")));
+check("Lint", "verify runs lint before build and audit",
+  /"verify":\s*"npm run lint && npm run build && node audit.mjs"/.test(read("package.json")));
+check("Lint", "no-undef is enabled",
+  /"no-undef":\s*"error"/.test(read("eslint.config.js")));
+check("Lint", "JSX components are scope-checked too",
+  /"react\/jsx-no-undef":\s*"error"/.test(read("eslint.config.js")));
 
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];

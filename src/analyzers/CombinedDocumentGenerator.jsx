@@ -598,9 +598,9 @@ export default function CombinedDocumentGenerator() {
             </button>
           )}
           {chunkState.done.length > 0 && !insightComplete && (
-            <button type="button" onClick={continueInsight} disabled={insightLoading}
+            <button type="button" onClick={continueInsight} disabled={loading}
               className="btn-gold ml-2">
-              {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+              {loading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
             </button>
           )}
           {chunkState.done.length > 0 && !insightComplete && (

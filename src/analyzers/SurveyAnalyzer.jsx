@@ -539,9 +539,9 @@ export default function SurveyAnalyzer() {
               </button>
             )}
             {chunkState.done.length > 0 && !insightComplete && (
-              <button type="button" onClick={continueInsight} disabled={insightLoading}
+              <button type="button" onClick={continueInsight} disabled={analysisLoading}
                 className="btn-gold ml-2">
-                {insightLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
+                {analysisLoading ? "Continuing..." : `Continue insight (${chunkProgress.remainingLabels.length} left)`}
               </button>
             )}
             {chunkState.done.length > 0 && !insightComplete && (

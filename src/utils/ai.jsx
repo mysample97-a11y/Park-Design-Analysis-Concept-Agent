@@ -305,7 +305,7 @@ export function transientMessage(status) {
 }
 
 // ---------- Gemini ----------
-export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry, abortSignal }) {
+export async function callGemini({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, onSources, onUsage, onRetry, abortSignal, timeoutMs }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Gemini API key is missing. Please enter your API key in Settings.");
 
@@ -359,7 +359,7 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
   // each attempt gets a fresh, unread body. Reading json() after a retried
   // response would throw "body stream already read".
   async function sendRaw(body) {
-    const { signal, done } = makeSignal(abortSignal, timeoutFor(opts));
+    const { signal, done } = makeSignal(abortSignal, timeoutMs || timeoutFor({ useWebSearch }));
     try {
       return await fetch(url, {
         signal,
@@ -422,7 +422,7 @@ export async function callGemini({ apiKey, content, systemInstruction, model, ma
 }
 
 // ---------- Claude ----------
-export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry, abortSignal }) {
+export async function callClaude({ apiKey, content, systemInstruction, model, maxTokens, imageData, useWebSearch, pdfBase64, onSources, onUsage, onRetry, abortSignal, timeoutMs }) {
   const cleanKey = (apiKey || "").trim();
   if (!cleanKey) throw new Error("Claude API key is missing. Please enter your API key in Settings.");
 
@@ -461,7 +461,7 @@ export async function callClaude({ apiKey, content, systemInstruction, model, ma
   if (useWebSearch) payload.tools = [{ type: "web_search_20250305", name: "web_search" }];
 
   const response = await withRetry(async () => {
-    const { signal, done } = makeSignal(abortSignal, timeoutFor(opts));
+    const { signal, done } = makeSignal(abortSignal, timeoutMs || timeoutFor({ useWebSearch }));
     try {
       return await fetch(url, {
         signal,
@@ -552,6 +552,7 @@ async function callAIInner(opts = {}) {
   const onUsage = opts.onUsage || null;
   const onRetry = opts.onRetry || null;
   const signal = opts.signal || null;
+  const timeoutMs = timeoutFor(opts);
   const abortSignal = opts.abortSignal || null;
 
   if (provider.includes("claude") || provider.includes("anthropic")) {

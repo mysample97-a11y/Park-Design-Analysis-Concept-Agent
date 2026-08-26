@@ -5,10 +5,14 @@ others. This exists because a missing import shipped a blank page while the
 production build reported success.
 
 ```bash
-npm run build          # 1. compiles
-node audit.mjs         # 2. capabilities are wired, imports exist
-node flow.harness.mjs  # 3. user journeys work    (needs the bundle step below)
+npm run lint             # 0. undefined identifiers, hook-order errors
+npm run build            # 1. compiles
+node audit.mjs           # 2. capabilities wired, imports exist
+node flow.harness.mjs    # 3. user journeys work   (bundle first, see below)
+node session.harness.mjs # 4. save/restore carries what the user typed
 ```
+
+`npm run verify` runs lint + build + audit in one go.
 
 The flow harness needs a bundle first:
 
@@ -23,6 +27,7 @@ npx esbuild harness_entry.js --bundle --format=esm --outfile=harness_out/all.mjs
 
 | Check | Catches | Blind to |
 |---|---|---|
+| `npm run lint` | **Undefined identifiers** (`opts is not defined`), hook-order errors | Anything semantically wrong but well-scoped |
 | `npm run build` | Syntax, unresolved module paths | **A component used but never imported** — compiles fine, throws on render. Anything runtime. |
 | `audit.mjs` | Features written but never called; import integrity; structural claims | Whether it works at runtime |
 | `flow.harness.mjs` | Crashes on real journeys: open from nexus, switch tabs, open settings | Anything needing a live API call |
@@ -32,6 +37,11 @@ npx esbuild harness_entry.js --bundle --format=esm --outfile=harness_out/all.mjs
 - **build**: syntax errors from scripted edits
 - **audit**: Tesseract OCR, report provenance, `retryAfterSeconds` — all written, unit-tested, wired to nothing; the missing `ToolErrorBoundary` import
 - **flow**: `ToolErrorBoundary is not defined` on opening Site Context — invisible to both the build and the isolation harness
+- **lint**: `opts is not defined` in the API layer, plus five more undefined
+  identifiers found the moment it was first run — `insightLoading` in two tools
+  that call it something else, `siteArea` in Concept (it is `siteAreaM2`),
+  `description` in Site Context (it is `siteDescription`). Every one a guaranteed
+  crash; every one invisible to the build.
 
 ## Standing rule
 
