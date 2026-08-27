@@ -7,11 +7,12 @@ import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
-import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import SectionSelector from "../components/SectionSelector";
 import ReportPreview from "../components/ReportPreview";
 import { extractJSON, friendlyError, buildRTF, downloadFile, printHTML, stripRTF, fileToBase64Raw, copyToClipboard } from "../utils/helpers";
 import { readExportFile, EXPORT_ACCEPT } from "../utils/readExport";
@@ -102,6 +103,11 @@ export default function CombinedDocumentGenerator() {
   const [chunkState, setChunkState] = useState(() => loadPartial("CMB", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
   const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
   const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Which sections the next run should produce. Defaults to everything not yet
+  // generated; the user narrows it to keep each request small on a free key.
+  const [selectedTopics, setSelectedTopics] = useState(() => INSIGHT_TOPICS.map((t) => t.key));
+  const outstandingKeys = INSIGHT_TOPICS.filter((t) => !chunkState.done.includes(t.key)).map((t) => t.key);
+  const activeSelection = selectedTopics.filter((k) => outstandingKeys.includes(k));
   // Exact token count on demand. On a button, not automatic: the counting call
   // still costs one REQUEST, and requests are the scarce resource on a free key.
   const [exactEstimate, setExactEstimate] = useState(null);
@@ -317,8 +323,14 @@ export default function CombinedDocumentGenerator() {
           "\n" + (gapCheck.uncited_standards || []).map((g) => `- Standard that governs here: ${g.standard} - ${g.relevance}`).join("\n")
         : "");
     try {
-      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+      const chunkInstruction = buildChunkedPrompt({
+        topics: INSIGHT_TOPICS,
+        done: chunkState.done,
+        continuationSummary: chunkState.continuationSummary,
+        // Narrows the OUTPUT only. Every input and all prior section text still go.
+        requested: activeSelection,
+        sections: chunkState.sections,
+      });
       const text = await callAI({
         onUsage: noteUsage,
       abortSignal: newAbort(),
@@ -583,6 +595,22 @@ export default function CombinedDocumentGenerator() {
               </div>
             )}
           </div>
+
+          <SectionSelector
+
+            topics={INSIGHT_TOPICS}
+
+            selected={selectedTopics}
+
+            onChange={setSelectedTopics}
+
+            doneKeys={chunkState.done}
+
+            disabled={busy}
+
+            freeTier={(getLimits(provider) || {}).tier !== "paid"}
+
+          />
 
           <button onClick={startFreshInsight} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>
           {busy && (

@@ -44,72 +44,86 @@ const PARTIAL_PREFIX = "as2p_partial_";
  * The key instruction is the completeness rule: better to return four whole
  * topics than eight truncated ones.
  */
-export function buildChunkedPrompt({ topics, done = [], continuationSummary = "" }) {
-  const remaining = topics.filter((t) => !done.includes(t.key));
+export function buildChunkedPrompt({ topics, done = [], continuationSummary = "", requested = null, sections = {} }) {
   const doneList = topics.filter((t) => done.includes(t.key));
+  // `requested` is the user's tick-box selection. Null means "everything left".
+  const outstanding = topics.filter((t) => !done.includes(t.key));
+  const target = requested && requested.length
+    ? outstanding.filter((t) => requested.includes(t.key))
+    : outstanding;
 
   let p = "\n\n--- SECTIONED GENERATION ---\n";
-  p += "Produce the sections listed under STILL TO GENERATE below.\n\n";
+  p += "Produce ONLY the sections listed under GENERATE NOW. Nothing else.\n\n";
   p += "COMPLETENESS RULE - THIS OVERRIDES LENGTH:\n";
-  p += "Only include a section if you can finish it completely within your output budget.\n";
-  p += "It is far better to return FOUR complete sections than EIGHT that stop mid-sentence.\n";
-  p += "Never truncate a section to fit more in. If you cannot finish a section, omit it\n";
-  p += "entirely and list its key under 'remaining'.\n\n";
+  p += "Only include a section if you can finish it completely. It is far better to\n";
+  p += "return TWO complete sections than FIVE that stop mid-sentence. Never truncate\n";
+  p += "a section to fit more in.\n\n";
 
   if (doneList.length) {
-    p += "ALREADY GENERATED - do not repeat these:\n";
-    doneList.forEach((t) => { p += `  - ${t.key}: ${t.label}\n`; });
-    p += "\n";
-  }
-  if (continuationSummary) {
-    p += "SUMMARY OF WHAT WAS ALREADY WRITTEN (for continuity of tone and to avoid\n";
-    p += "contradicting yourself - do not repeat this content):\n" + continuationSummary + "\n\n";
+    /*
+     * The full text of what is already written goes in, not just a summary.
+     *
+     * A section written without sight of the others contradicts them, repeats
+     * them, or refers to things they never said. Passing the actual content is
+     * the difference between a report and a pile of fragments - and it is the
+     * whole reason selection narrows the OUTPUT only.
+     */
+    p += "ALREADY GENERATED - do not repeat or contradict these. Write what follows so\n";
+    p += "that it reads as part of the same report:\n\n";
+    doneList.forEach((t) => {
+      const v = sections[t.key];
+      let text = "";
+      if (typeof v === "string") text = v;
+      else if (v != null) { try { text = JSON.stringify(v); } catch { text = ""; } }
+      // Trimmed per section: enough for continuity, bounded so a long report
+      // does not push the prompt past the input limit.
+      if (text.length > 2500) text = text.slice(0, 2500) + " ...[trimmed]";
+      p += `[${t.key}] ${t.label}\n${text || "(generated)"}\n\n`;
+    });
   }
 
-  p += "STILL TO GENERATE:\n";
-  remaining.forEach((t) => { p += `  - ${t.key}: ${t.label}\n`; });
+  if (continuationSummary) {
+    p += "SUMMARY OF THE RUN SO FAR:\n" + continuationSummary + "\n\n";
+  }
+
+  p += "GENERATE NOW:\n";
+  target.forEach((t) => { p += `  - ${t.key}: ${t.label}\n`; });
+
+  const notNow = outstanding.filter((t) => !target.includes(t));
+  if (notNow.length) {
+    p += "\nDO NOT generate these yet - the user will request them separately:\n";
+    notNow.forEach((t) => { p += `  - ${t.key}: ${t.label}\n`; });
+  }
 
   /*
-   * ADDITIVE, NOT REPLACEMENT — this is the critical part.
+   * ADDITIVE, NOT REPLACEMENT.
    *
-   * The first version told the model to answer with a DIFFERENT schema
+   * An earlier version told the model to answer with a DIFFERENT schema
    * ({"sections": {...}, "completed": [...]}) from the one the tool's own prompt
-   * had just specified. Two contracts in one prompt, and the model resolved the
-   * conflict by emitting only the control fields:
-   *
-   *     {"completed":["zone_recommendations", ...],"remaining":[]}
-   *
-   * No sections, 100 output tokens, an empty report - across every tool. The
-   * merge then correctly rejected the false completion claim, so the run looked
-   * like it had produced nothing, because it had.
-   *
-   * So: KEEP the tool's schema exactly as specified, and add two optional
-   * top-level keys alongside it. The model returns the object it was already
-   * going to return, simply omitting keys it could not finish.
+   * had just specified. Two contracts in one prompt, and the model resolved it
+   * by emitting only the control fields - no content, 100 output tokens, an
+   * empty report, across every tool.
    */
   p += "\nHOW TO RETURN THIS\n";
-  p += "Use EXACTLY the JSON shape the instructions above specify - the same keys,\n";
-  p += "the same types. Do not wrap it in a 'sections' object and do not invent a\n";
-  p += "different structure.\n\n";
+  p += "Use EXACTLY the JSON shape the instructions above specify - the same keys, the\n";
+  p += "same types. Do not wrap it in a 'sections' object and do not invent a different\n";
+  p += "structure.\n\n";
   p += "Two changes only:\n";
-  p += "  1. OMIT any key you could not finish completely. A missing key is the\n";
-  p += "     signal that it still needs generating - never emit a key with a\n";
-  p += "     placeholder, an empty string or a truncated value.\n";
-  p += "  2. Add these two extra top-level keys so the run can be resumed:\n";
-  p += '       "_remaining": ["<keys you did NOT complete>"],\n';
-  p += '       "_summary": "<2-3 sentences on what you wrote, so a later call can\n';
-  p += '                    continue without repeating it>"\n';
-  p += "\nDo not add a '_completed' key. Whether a section is done is determined by\n";
-  p += "whether its content is actually present, not by a claim about it.\n";
+  p += "  1. INCLUDE ONLY the keys listed under GENERATE NOW. Omit every other key,\n";
+  p += "     including ones you were shown above - they are already saved. Never emit\n";
+  p += "     a key with a placeholder, an empty string or a truncated value.\n";
+  p += "  2. Add one extra top-level key so the run can be resumed:\n";
+  p += '       "_summary": "<2-3 sentences on what you just wrote>"\n';
+  p += "\nDo not add a '_completed' key. Whether a section is done is decided by whether\n";
+  p += "its content is present, not by a claim about it.\n";
 
-  p += "\nOPTIONAL - only when live web research returned something material the\n";
-  p += "sections above do not cover (a local code requirement, a published\n";
-  p += "site-specific constraint), you may also add:\n";
+  p += "\nOPTIONAL - only when live web research returned something material that the\n";
+  p += "sections do not cover (a local code requirement, a published site-specific\n";
+  p += "constraint), you may also add:\n";
   p += '  "extra_findings": [{ "title": "", "text": "", "items": [] }]\n';
   p += "It must be additive, from a source you actually retrieved, and must not\n";
-  p += "duplicate or replace any key above. Omit it entirely if you have nothing\n";
+  p += "duplicate or replace any section. Omit it entirely if you have nothing\n";
   p += "retrieved to add - a speculative entry is worse than none.\n";
-
   return p;
 }
 

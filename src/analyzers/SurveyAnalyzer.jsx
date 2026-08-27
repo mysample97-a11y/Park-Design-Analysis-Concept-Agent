@@ -3,6 +3,7 @@ import { Sparkles, BarChart3, AlertTriangle, Info, Upload, Image as ImageIcon, C
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import SectionSelector from "../components/SectionSelector";
 import ReportPreview from "../components/ReportPreview";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
@@ -10,7 +11,7 @@ import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
-import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
@@ -137,6 +138,11 @@ export default function SurveyAnalyzer() {
   const [chunkState, setChunkState] = useState(() => loadPartial("SUR", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
   const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
   const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Which sections the next run should produce. Defaults to everything not yet
+  // generated; the user narrows it to keep each request small on a free key.
+  const [selectedTopics, setSelectedTopics] = useState(() => INSIGHT_TOPICS.map((t) => t.key));
+  const outstandingKeys = INSIGHT_TOPICS.filter((t) => !chunkState.done.includes(t.key)).map((t) => t.key);
+  const activeSelection = selectedTopics.filter((k) => outstandingKeys.includes(k));
   // Exact token count on demand. On a button, not automatic: the counting call
   // still costs one REQUEST, and requests are the scarce resource on a free key.
   const [exactEstimate, setExactEstimate] = useState(null);
@@ -322,8 +328,14 @@ export default function SurveyAnalyzer() {
       free_text_questions: textColumns.map((c) => ({ question: c.header, responses: c.values.filter((v) => v.trim()) })),
     };
     try {
-      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+      const chunkInstruction = buildChunkedPrompt({
+        topics: INSIGHT_TOPICS,
+        done: chunkState.done,
+        continuationSummary: chunkState.continuationSummary,
+        // Narrows the OUTPUT only. Every input and all prior section text still go.
+        requested: activeSelection,
+        sections: chunkState.sections,
+      });
       const text = await callAI({
         onUsage: noteUsage,
       abortSignal: newAbort(),
@@ -521,6 +533,14 @@ export default function SurveyAnalyzer() {
               <span className="font-semibold">{parsed.responseCount}</span> response{parsed.responseCount !== 1 ? "s" : ""} parsed
               {parsed.responseCount < 20 && <span className="text-brand-warning"> - small sample, treat patterns as indicative</span>}
             </p>
+            <SectionSelector
+              topics={INSIGHT_TOPICS}
+              selected={selectedTopics}
+              onChange={setSelectedTopics}
+              doneKeys={chunkState.done}
+              disabled={busy}
+              freeTier={(getLimits(provider) || {}).tier !== "paid"}
+            />
             <button onClick={startFreshInsight} disabled={analysisLoading || !apiKey} className="btn-dark">
               {chunkState.done.length === 0 ? "Generate AI Insight"
                 : insightComplete ? "Regenerate AI Insight"

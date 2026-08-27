@@ -432,7 +432,11 @@ check("Contract", "the chunk instruction does not impose a 'sections' wrapper",
 check("Contract", "it tells the model to keep the tool's own schema",
   /EXACTLY the JSON shape the instructions above specify/.test(F.chunked));
 check("Contract", "it asks for omission rather than placeholders",
-  /OMIT any key you could not finish/.test(F.chunked));
+  // Wording tightened when selection was added: the model is now told to include
+  // ONLY the requested keys, which subsumes the earlier "omit what you cannot
+  // finish" instruction.
+  /INCLUDE ONLY the keys listed under GENERATE NOW/.test(F.chunked) &&
+  /Never emit\n.*a key with a placeholder|placeholder, an empty string or a truncated value/.test(F.chunked));
 check("Contract", "completion is judged by content, not by a claim",
   /Do not add a '_completed' key/.test(F.chunked) && /Trust our own record/.test(F.chunked));
 check("Contract", "a flat reply is accepted by the merge",
@@ -441,6 +445,28 @@ check("Resilience", "capacity refusals are not retried",
   /maxAttempts: 1, baseDelay: 0/.test(F.ai));
 check("Resilience", "stored model aliases are migrated to a pinned id",
   /function migrateGeminiModel/.test(F.settings) && /gemini-flash-latest/.test(F.settings));
+
+
+/* ------------------------------------------ 17. SECTION SELECTION */
+{
+  const expect = TOOLS.filter((t) => t !== "ConceptGenerator");
+  const a = expect.filter((t) => !/<SectionSelector/.test(A[t]));
+  check("Selection", "every applicable tool offers a section selector", a.length === 0, a.join(", "));
+  const b = expect.filter((t) => !/requested: activeSelection/.test(A[t]));
+  check("Selection", "the selection narrows the request", b.length === 0, b.join(", "));
+  const c = expect.filter((t) => !/sections: chunkState\.sections/.test(A[t]));
+  check("Selection", "prior section CONTENT is sent with every run", c.length === 0, c.join(", "));
+}
+check("Selection", "the prompt carries prior text, not just a summary",
+  /ALREADY GENERATED - do not repeat or contradict/.test(F.chunked) && /sections\[t\.key\]/.test(F.chunked));
+check("Selection", "prior content is trimmed so the prompt cannot overflow",
+  /text\.slice\(0, 2500\)/.test(F.chunked));
+check("Selection", "deferred sections are named so the model does not pre-empt them",
+  /DO NOT generate these yet/.test(F.chunked));
+check("Selection", "the selector explains the free-tier strategy",
+  /generate a few sections at a time/.test(read("src/components/SectionSelector.jsx")));
+check("Cancel", "counting cannot compete with a run in flight",
+  /disabled=\{calculating \|\| busy\}/.test(F.rails));
 
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];

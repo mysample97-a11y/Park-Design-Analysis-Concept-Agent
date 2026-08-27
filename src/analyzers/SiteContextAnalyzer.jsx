@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Sparkles, Plus, Trash2, MapPin, Info, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, FileText, Printer, Search, Image as ImageIcon } from "lucide-react";
 import * as XLSX from "xlsx";
 import { callAI } from "../utils/ai";
-import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
@@ -12,6 +12,7 @@ import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, fileToBase64Raw, fileToImagePart, extractJSON } from "../utils/helpers";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import SectionSelector from "../components/SectionSelector";
 import ReportPreview from "../components/ReportPreview";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 
@@ -119,6 +120,11 @@ export default function SiteContextAnalyzer() {
   const [chunkState, setChunkState] = useState(() => loadPartial("SCX", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
   const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
   const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Which sections the next run should produce. Defaults to everything not yet
+  // generated; the user narrows it to keep each request small on a free key.
+  const [selectedTopics, setSelectedTopics] = useState(() => INSIGHT_TOPICS.map((t) => t.key));
+  const outstandingKeys = INSIGHT_TOPICS.filter((t) => !chunkState.done.includes(t.key)).map((t) => t.key);
+  const activeSelection = selectedTopics.filter((k) => outstandingKeys.includes(k));
   const [exactEstimate, setExactEstimate] = useState(null);
   const [counting, setCounting] = useState(false);
   async function calculateTokens() {
@@ -378,8 +384,14 @@ export default function SiteContextAnalyzer() {
 
       if (!resText) throw new Error("The AI returned an empty response.");
      
-      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-        done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+      const chunkInstruction = buildChunkedPrompt({
+        topics: INSIGHT_TOPICS,
+        done: chunkState.done,
+        continuationSummary: chunkState.continuationSummary,
+        // Narrows the OUTPUT only. All inputs and all prior section text still go.
+        requested: activeSelection,
+        sections: chunkState.sections,
+      });
  const parsedInsight = extractJSON(resText);
       if (!parsedInsight) throw new Error(
         "The AI's reply could not be read as structured data, even after recovery. Try again.");
@@ -733,6 +745,14 @@ export default function SiteContextAnalyzer() {
         <div className="bg-white rounded-lg border-2 border-[#E8E2D5] p-4">
           <div className="flex items-center mb-2 flex-wrap gap-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-[#5A5445]">Step 2 - AI Insight & Recommendation</h2>
+            <SectionSelector
+              topics={INSIGHT_TOPICS}
+              selected={selectedTopics}
+              onChange={setSelectedTopics}
+              doneKeys={chunkState.done}
+              disabled={busy}
+              freeTier={(getLimits(provider) || {}).tier !== "paid"}
+            />
             <button onClick={startFreshInsight} disabled={insightLoading} title={chunkState.done.length && !insightComplete ? "Continue generating the remaining sections" : undefined} style={BTN_DARK} className="text-sm font-bold px-4 py-2.5 rounded-md flex items-center gap-2 disabled:opacity-40 shadow-md">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>

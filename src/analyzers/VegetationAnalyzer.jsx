@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from "react";
 import { Sparkles, Leaf, Info, Mountain, AlertTriangle, ImageIcon, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import SectionSelector from "../components/SectionSelector";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
-import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
@@ -83,6 +84,11 @@ export default function VegetationAnalyzer() {
   const [chunkState, setChunkState] = useState(() => loadPartial("VEG", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
   const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
   const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Which sections the next run should produce. Defaults to everything not yet
+  // generated; the user narrows it to keep each request small on a free key.
+  const [selectedTopics, setSelectedTopics] = useState(() => INSIGHT_TOPICS.map((t) => t.key));
+  const outstandingKeys = INSIGHT_TOPICS.filter((t) => !chunkState.done.includes(t.key)).map((t) => t.key);
+  const activeSelection = selectedTopics.filter((k) => outstandingKeys.includes(k));
   // Exact token count on demand. On a button, not automatic: the counting call
   // still costs one REQUEST, and requests are the scarce resource on a free key.
   const [exactEstimate, setExactEstimate] = useState(null);
@@ -313,8 +319,14 @@ export default function VegetationAnalyzer() {
       general_reference_palette: PLANT_PALETTE.map((p) => ({ name: p.name, water: p.water, shade: p.shade, origin: p.origin })),
     };
     try {
-      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+      const chunkInstruction = buildChunkedPrompt({
+        topics: INSIGHT_TOPICS,
+        done: chunkState.done,
+        continuationSummary: chunkState.continuationSummary,
+        // Narrows the OUTPUT only. Every input and all prior section text still go.
+        requested: activeSelection,
+        sections: chunkState.sections,
+      });
       const text = await callAI({
         onUsage: noteUsage,
       abortSignal: newAbort(),
@@ -542,6 +554,14 @@ export default function VegetationAnalyzer() {
               <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">Step 2 — AI Insight & Recommendation</h2>
               <p className="text-[10px] text-brand-text/60">Uses your site context + terrain/soil data + reference palette to suggest what actually fits this site.</p>
             </div>
+            <SectionSelector
+              topics={INSIGHT_TOPICS}
+              selected={selectedTopics}
+              onChange={setSelectedTopics}
+              doneKeys={chunkState.done}
+              disabled={busy}
+              freeTier={(getLimits(provider) || {}).tier !== "paid"}
+            />
             <button onClick={startFreshInsight} disabled={insightLoading || !apiKey} className="btn-dark">
               {chunkState.done.length === 0 ? "Generate AI Insight"
                 : insightComplete ? "Regenerate AI Insight"

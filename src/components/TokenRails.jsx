@@ -70,7 +70,7 @@ function Bar({ used, limit }) {
 
 /** LEFT RAIL - what you may spend. */
 export function BudgetRail({ provider = "claude", estimate = null, onCalculate = null,
-                             onClearEstimate = null, calculating = false }) {
+                             onClearEstimate = null, calculating = false, busy = false }) {
   // Limits are declared HERE, not in Settings. They were in both places, which
   // meant two sources for one number - and the rail is where they are actually
   // consulted, so this is where they belong.
@@ -172,7 +172,10 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
           <button
             type="button"
             onClick={onCalculate}
-            disabled={calculating}
+            disabled={calculating || busy}
+            title={busy
+              ? "A request is already running. Counting tokens is itself an API request, so it waits until that finishes."
+              : "Counts your inputs exactly using the provider's free counting endpoint (uses one request)."}
             style={{
               marginTop: 7, width: "100%", padding: "6px 8px", fontSize: 11,
               background: calculating ? "#0B1220" : "#12233C", color: "#DCE6E0",
@@ -180,7 +183,7 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
               cursor: calculating ? "default" : "pointer",
             }}
           >
-            {calculating ? "Counting…" : "Calculate tokens for my inputs"}
+            {calculating ? "Counting…" : busy ? "Calculate (waiting for the current run)" : "Calculate tokens for my inputs"}
           </button>
         )}
         <div style={{ fontSize: 10.5, color: LEVEL_FG[cap.level] || "#8FA3BA", marginTop: 7 }}>
@@ -286,8 +289,8 @@ export function UsageRail({ usage, provider = "claude", partial = null, onReset 
             Cancel request
           </button>
           <div style={{ fontSize: 9.5, color: "#7E90A6", marginTop: 5, lineHeight: 1.4 }}>
-            Requests time out on their own after 90s. Cancelling keeps everything
-            already generated.
+            Requests time out on their own after 4-5 minutes. Cancelling keeps
+            everything already generated.
           </div>
         </div>
       )}
@@ -429,6 +432,7 @@ export default function TokenRails({ provider, usage, estimate, partial, onReset
           onCalculate={onCalculate}
           onClearEstimate={onClearEstimate}
           calculating={calculating}
+          busy={busy}
         />
         <UsageRail usage={usage} provider={provider} partial={partial} onReset={onReset}
           onCancel={onCancel} busy={busy} />

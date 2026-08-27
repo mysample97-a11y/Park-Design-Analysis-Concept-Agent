@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from "react";
 import { Sparkles, Plus, Trash2, Wind, AlertTriangle, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { useAppContext } from "../App";
 import ToolIntro from "../components/ToolIntro";
+import SectionSelector from "../components/SectionSelector";
 import ReportPreview from "../components/ReportPreview";
 import { callAI } from "../utils/ai";
 import {
   buildChunkedPrompt, emptyState, mergeChunk, isComplete,
   progressLabel, savePartial, loadPartial, clearPartial,
 } from "../utils/chunkedGeneration";
-import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact } from "../utils/tokenMeter";
+import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
 import { uid, friendlyError, extractJSON } from "../utils/helpers";
@@ -82,6 +83,11 @@ export default function WindAnalyzer() {
   const [chunkState, setChunkState] = useState(() => loadPartial("WND", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
   const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
   const insightComplete = isComplete(chunkState, INSIGHT_TOPICS);
+  // Which sections the next run should produce. Defaults to everything not yet
+  // generated; the user narrows it to keep each request small on a free key.
+  const [selectedTopics, setSelectedTopics] = useState(() => INSIGHT_TOPICS.map((t) => t.key));
+  const outstandingKeys = INSIGHT_TOPICS.filter((t) => !chunkState.done.includes(t.key)).map((t) => t.key);
+  const activeSelection = selectedTopics.filter((k) => outstandingKeys.includes(k));
   // Exact token count on demand. On a button, not automatic: the counting call
   // still costs one REQUEST, and requests are the scarce resource on a free key.
   const [exactEstimate, setExactEstimate] = useState(null);
@@ -313,8 +319,14 @@ export default function WindAnalyzer() {
       zones: zones.filter((z) => z.name.trim()).map((z) => ({ zone: z.name, wants_passive_cooling: z.wantsCooling, has_windbreak_screening: z.hasScreening, assessment: zoneFlag(z).label })),
     };
     try {
-      const chunkInstruction = buildChunkedPrompt({ topics: INSIGHT_TOPICS,
-                done: chunkState.done, continuationSummary: chunkState.continuationSummary });
+      const chunkInstruction = buildChunkedPrompt({
+        topics: INSIGHT_TOPICS,
+        done: chunkState.done,
+        continuationSummary: chunkState.continuationSummary,
+        // Narrows the OUTPUT only. Every input and all prior section text still go.
+        requested: activeSelection,
+        sections: chunkState.sections,
+      });
       const text = await callAI({
         onUsage: noteUsage,
       abortSignal: newAbort(),
@@ -577,6 +589,14 @@ export default function WindAnalyzer() {
         <div className="p-4">
           <div className="flex items-center mb-2 flex-wrap gap-4">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-brand-text">AI Insight & Recommendation</h2>
+            <SectionSelector
+              topics={INSIGHT_TOPICS}
+              selected={selectedTopics}
+              onChange={setSelectedTopics}
+              doneKeys={chunkState.done}
+              disabled={busy}
+              freeTier={(getLimits(provider) || {}).tier !== "paid"}
+            />
             <button onClick={startFreshInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
               <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
             </button>
