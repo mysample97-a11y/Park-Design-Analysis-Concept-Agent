@@ -6,6 +6,26 @@ const STORAGE_KEYS = {
   gemini: "site_analysis_gemini_key",
 };
 
+/*
+ * ALIAS MIGRATION
+ *
+ * Pinning the DEFAULT to gemini-2.5-flash only helps a brand-new browser. Anyone
+ * who used the app before still has "gemini-flash-latest" in localStorage, and a
+ * stored value always wins - so the pin never took effect for existing users and
+ * the 503s continued. An alias can resolve to preview capacity, which is where
+ * those refusals come from.
+ *
+ * Known aliases are therefore rewritten on load. An explicitly chosen PINNED
+ * model is never touched.
+ */
+const ALIASES = ["gemini-flash-latest", "gemini-pro-latest", "gemini-latest", "gemini-1.5-flash-latest"];
+function migrateGeminiModel(stored) {
+  if (!stored) return "";
+  if (!ALIASES.includes(stored.trim())) return stored;
+  try { localStorage.setItem("site_analysis_gemini_model", "gemini-2.5-flash"); } catch { /* ignore */ }
+  return "gemini-2.5-flash";
+}
+
 const MODEL_KEYS = {
   claude: "site_analysis_claude_model",
   gemini: "site_analysis_gemini_model",
@@ -46,7 +66,7 @@ export function useApiKeys() {
       });
       setModels({
         claude: localStorage.getItem(MODEL_KEYS.claude) || DEFAULT_MODELS.claude,
-        gemini: localStorage.getItem(MODEL_KEYS.gemini) || DEFAULT_MODELS.gemini,
+        gemini: migrateGeminiModel(localStorage.getItem(MODEL_KEYS.gemini)) || DEFAULT_MODELS.gemini,
       });
       /*
        * GROUNDING DEFAULT FOLLOWS THE DECLARED TIER.

@@ -173,8 +173,21 @@ export function abortMessage(err, externalSignal, usedMs) {
          "not your key or your input. Nothing already generated has been lost.";
 }
 function policyFor(status) {
+  /*
+   * 503 IS NOT RETRIED AT ALL ANY MORE.
+   *
+   * Evidence from a real request log: every single 503 was followed by a retry
+   * that also returned 503. Twelve logged requests, six of them retries, zero
+   * recoveries. On a 20-per-minute free tier that is half the budget spent on
+   * attempts that cannot succeed - and the exhausted budget then produces the
+   * "usage limit" message on top of the original refusal.
+   *
+   * A capacity refusal means the model has nothing spare right now. Waiting a
+   * minute helps; asking again immediately does not. Failing fast leaves the
+   * user their quota and lets them choose when to try again.
+   */
   return CAPACITY_STATUSES.includes(status)
-    ? { maxAttempts: 2, baseDelay: 6000 }
+    ? { maxAttempts: 1, baseDelay: 0 }
     : { maxAttempts: MAX_ATTEMPTS, baseDelay: 1000 };
 }
 

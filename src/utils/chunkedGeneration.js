@@ -69,25 +69,47 @@ export function buildChunkedPrompt({ topics, done = [], continuationSummary = ""
   p += "STILL TO GENERATE:\n";
   remaining.forEach((t) => { p += `  - ${t.key}: ${t.label}\n`; });
 
-  p += "\nRESPOND WITH ONLY THIS JSON, no markdown fences:\n";
-  p += '{\n';
-  p += '  "sections": { "<topic key>": "<the full section text>" },\n';
-  p += '  "completed": ["<keys you FINISHED>"],\n';
-  p += '  "remaining": ["<keys you did NOT attempt>"],\n';
-  p += '  "continuation_summary": "<2-3 sentences summarising what you wrote, so a\n';
-  p += '     later call can continue coherently without repeating it>"\n';
-  p += '}\n';
-  p += "\nOPTIONAL - only when live web research returned something material that the\n";
-  p += "sections above do not already cover (a local code requirement, a published\n";
-  p += "site-specific constraint), you may also return:\n";
+  /*
+   * ADDITIVE, NOT REPLACEMENT — this is the critical part.
+   *
+   * The first version told the model to answer with a DIFFERENT schema
+   * ({"sections": {...}, "completed": [...]}) from the one the tool's own prompt
+   * had just specified. Two contracts in one prompt, and the model resolved the
+   * conflict by emitting only the control fields:
+   *
+   *     {"completed":["zone_recommendations", ...],"remaining":[]}
+   *
+   * No sections, 100 output tokens, an empty report - across every tool. The
+   * merge then correctly rejected the false completion claim, so the run looked
+   * like it had produced nothing, because it had.
+   *
+   * So: KEEP the tool's schema exactly as specified, and add two optional
+   * top-level keys alongside it. The model returns the object it was already
+   * going to return, simply omitting keys it could not finish.
+   */
+  p += "\nHOW TO RETURN THIS\n";
+  p += "Use EXACTLY the JSON shape the instructions above specify - the same keys,\n";
+  p += "the same types. Do not wrap it in a 'sections' object and do not invent a\n";
+  p += "different structure.\n\n";
+  p += "Two changes only:\n";
+  p += "  1. OMIT any key you could not finish completely. A missing key is the\n";
+  p += "     signal that it still needs generating - never emit a key with a\n";
+  p += "     placeholder, an empty string or a truncated value.\n";
+  p += "  2. Add these two extra top-level keys so the run can be resumed:\n";
+  p += '       "_remaining": ["<keys you did NOT complete>"],\n';
+  p += '       "_summary": "<2-3 sentences on what you wrote, so a later call can\n';
+  p += '                    continue without repeating it>"\n';
+  p += "\nDo not add a '_completed' key. Whether a section is done is determined by\n";
+  p += "whether its content is actually present, not by a claim about it.\n";
+
+  p += "\nOPTIONAL - only when live web research returned something material the\n";
+  p += "sections above do not cover (a local code requirement, a published\n";
+  p += "site-specific constraint), you may also add:\n";
   p += '  "extra_findings": [{ "title": "", "text": "", "items": [] }]\n';
-  p += "Rules for it: each entry must be additive, not a restatement; it must come from\n";
-  p += "a source you actually retrieved and can cite; and it must NOT duplicate or\n";
-  p += "replace any section listed above. Omit the field entirely if you have nothing\n";
-  p += "retrieved to add - an empty or speculative entry is worse than none.\n";
-  p += "\nPut 'completed', 'remaining' and 'continuation_summary' FIRST in the JSON object.\n";
-  p += "If output is cut short, those fields must already have been emitted - they are\n";
-  p += "what makes resuming possible.\n";
+  p += "It must be additive, from a source you actually retrieved, and must not\n";
+  p += "duplicate or replace any key above. Omit it entirely if you have nothing\n";
+  p += "retrieved to add - a speculative entry is worse than none.\n";
+
   return p;
 }
 
@@ -119,7 +141,9 @@ export function mergeChunk(state, reply, topics) {
   };
   if (!reply || typeof reply !== "object") return next;
 
-  const incoming = reply.sections && typeof reply.sections === "object" ? reply.sections : {};
+  // The reply is the tool's own flat object. `sections` is still accepted for
+  // any older saved partial, but the normal shape is now flat.
+  const incoming = reply.sections && typeof reply.sections === "object" ? reply.sections : reply;
   const validKeys = new Set(topics.map((t) => t.key));
 
   /*
@@ -161,8 +185,9 @@ export function mergeChunk(state, reply, topics) {
   next.done = topics.map((t) => t.key).filter((k) => volume(next.sections[k]) > 0);
   next.remaining = topics.map((t) => t.key).filter((k) => !next.done.includes(k));
 
-  if (typeof reply.continuation_summary === "string" && reply.continuation_summary.trim()) {
-    next.continuationSummary = reply.continuation_summary.trim();
+  const summary = reply._summary || reply.continuation_summary;
+  if (typeof summary === "string" && summary.trim()) {
+    next.continuationSummary = summary.trim();
   }
   return next;
 }

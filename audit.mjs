@@ -95,8 +95,10 @@ check("Budget", "the visible tool is chosen by the tab, not by mount order",
   /export function setActiveCode/.test(F.bridge) && /setActiveCode\(TAB_TOOL_CODE\[activeTab\]/.test(F.app));
 
 /* ---------------------------------------------------------------- 3. RESILIENCE */
-check("Resilience", "capacity failures get a longer, shorter-lived retry",
-  /CAPACITY_STATUSES/.test(F.ai) && /maxAttempts: 2, baseDelay: 6000/.test(F.ai));
+check("Resilience", "capacity failures are identified separately",
+  // Superseded: they now get NO retry at all. A real log showed six retries after
+  // 503 and zero recoveries, so the retry only spent quota.
+  /CAPACITY_STATUSES/.test(F.ai) && /maxAttempts: 1, baseDelay: 0/.test(F.ai));
 check("Resilience", "429 is never retried (it would burn the scarce resource)",
   !/RETRY_STATUSES = \[[^\]]*429/.test(F.ai));
 check("Resilience", "retry attempts shrink as request headroom shrinks",
@@ -416,6 +418,29 @@ check("Lint", "no-undef is enabled",
   /"no-undef":\s*"error"/.test(read("eslint.config.js")));
 check("Lint", "JSX components are scope-checked too",
   /"react\/jsx-no-undef":\s*"error"/.test(read("eslint.config.js")));
+
+
+/* ------------------------------- 16. RESPONSE CONTRACT
+ * The chunk instruction must EXTEND the tool's own JSON schema, never replace
+ * it. Telling the model to answer with {"sections":{...}} when the tool had just
+ * asked for a flat object gave it two contracts; it emitted only the control
+ * fields and no content, across every tool. That is the single most damaging
+ * regression this project has had - it silently disabled insight generation.
+ */
+check("Contract", "the chunk instruction does not impose a 'sections' wrapper",
+  !/"sections":\s*\{ "<topic key>"/.test(F.chunked));
+check("Contract", "it tells the model to keep the tool's own schema",
+  /EXACTLY the JSON shape the instructions above specify/.test(F.chunked));
+check("Contract", "it asks for omission rather than placeholders",
+  /OMIT any key you could not finish/.test(F.chunked));
+check("Contract", "completion is judged by content, not by a claim",
+  /Do not add a '_completed' key/.test(F.chunked) && /Trust our own record/.test(F.chunked));
+check("Contract", "a flat reply is accepted by the merge",
+  /reply\.sections && typeof reply\.sections === "object" \? reply\.sections : reply/.test(F.chunked));
+check("Resilience", "capacity refusals are not retried",
+  /maxAttempts: 1, baseDelay: 0/.test(F.ai));
+check("Resilience", "stored model aliases are migrated to a pinned id",
+  /function migrateGeminiModel/.test(F.settings) && /gemini-flash-latest/.test(F.settings));
 
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];
