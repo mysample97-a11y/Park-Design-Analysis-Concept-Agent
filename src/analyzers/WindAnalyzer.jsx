@@ -21,7 +21,7 @@ import * as XLSX from "xlsx";
 const RISK_COLOR = { Low: "#4DD091", Medium: "#FFB454", High: "#FF7A66" };
 
 export default function WindAnalyzer() {
-  const { provider, apiKey, meta } = useAppContext();
+  const { provider, apiKey, meta, grounding } = useAppContext();
   const [location, setLocation] = useState("");
   // Live handle on the current render's closures for the rails bridge.
   const bridgeRef = useRef({});
@@ -360,7 +360,21 @@ export default function WindAnalyzer() {
       // "(not generated)" into those sections with nothing on screen to say
       // why. Keys are taken from THIS tool's own prompt so the check cannot
       // drift away from the contract it is checking.
-      const gaps = missingFields(parsedInsight, ["zone_recommendations", "governing_criteria", "extreme_events", "contextual_effects", "conclusion"]);
+      // Judge against the MERGED state, not this one reply. With section
+      // selection a reply contains only the keys that were requested, so
+      // checking the reply alone flagged every other section as missing -
+      // including ones already generated and saved.
+      const _requestedNow = (activeSelection && activeSelection.length)
+        ? activeSelection
+        : INSIGHT_TOPICS.map((t) => t.key);
+      const gaps = _requestedNow.filter((k) => {
+        const v = _merged.sections[k];
+        if (v == null) return true;
+        if (typeof v === "string") return !v.trim();
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === "object") return Object.keys(v).length === 0;
+        return false;
+      });
       setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");

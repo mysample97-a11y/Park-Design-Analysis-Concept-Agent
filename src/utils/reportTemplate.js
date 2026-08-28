@@ -72,7 +72,7 @@ export const TOOL_SPECS = {
       { t: "Solar Calculator - calculation details (after Meeus, Astronomical Algorithms)", o: "NOAA GML", y: "",
         u: "https://gml.noaa.gov/grad/solcalc/calcdetails.html" },
       { t: "Clear-sky irradiance model (A, B, C coefficient method)", o: "ASHRAE Handbook of Fundamentals", y: "", u: "" },
-      { t: "Park Design Guidelines - shade coverage requirements", o: "Delhi Urban Art Commission", y: "", u: "" },
+      { t: "Park Design Guidelines - shade coverage requirements (EXTERNAL benchmark - not the governing authority at this location)", o: "Delhi Urban Art Commission", y: "", u: "" },
       { t: "Assessment of the Solar Potential of Buildings Based on Photogrammetric Data (the established method for deriving shade and solar potential from site geometry - requires 3D mesh data this tool does not hold)", o: "Jaczewska, Sybilski & Tywonek, Energies 18(4):868", y: "2025", u: "https://www.mdpi.com/1996-1073/18/4/868" },
     ],
     convention:
@@ -166,7 +166,7 @@ export const TOOL_SPECS = {
       "Species availability from local nurseries is not verified.",
     ],
     refs: [
-      { t: "Park Design Guidelines - planting, species selection and water demand", o: "Delhi Urban Art Commission", y: "", u: "" },
+      { t: "Park Design Guidelines - planting, species selection and water demand (EXTERNAL benchmark - not the governing authority at this location)", o: "Delhi Urban Art Commission", y: "", u: "" },
     ],
     convention:
       "Planting schedules should record botanical name, water-demand band and minimum rootable soil volume. Soil volume is the parameter most often omitted and the most common cause of canopy failure in arid urban planting.",
@@ -199,7 +199,7 @@ export const TOOL_SPECS = {
       "Concepts require review by a qualified designer before selection.",
     ],
     refs: [
-      { t: "Park Design Guidelines - zoning, circulation and facility provision", o: "Delhi Urban Art Commission", y: "", u: "" },
+      { t: "Park Design Guidelines - zoning, circulation and facility provision (EXTERNAL benchmark - not the governing authority at this location)", o: "Delhi Urban Art Commission", y: "", u: "" },
       { t: "Comprehensive Guide to Site Analysis Checklist for Architectural Projects", o: "Architects Registration Council of Nigeria (ARCON)", y: "", u: "" },
     ],
     convention:

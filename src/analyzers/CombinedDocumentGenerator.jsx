@@ -43,7 +43,7 @@ const SECTIONS = [
 ];
 
 export default function CombinedDocumentGenerator() {
-  const { provider, apiKey, meta } = useAppContext();
+  const { provider, apiKey, meta, grounding } = useAppContext();
   const [inputs, setInputs] = useState(() => Object.fromEntries(SECTIONS.map((s) => [s.id, s.default])));
   // Live handle on the current render's closures for the rails bridge.
   const bridgeRef = useRef({});
@@ -369,8 +369,21 @@ export default function CombinedDocumentGenerator() {
 
       // then prints "(not generated)" with nothing on screen explaining why.
 
-      const gaps = missingFields(parsedResult, ["matrix", "design_implications", "concept_brief"]);
-
+      // Judge against the MERGED state, not this one reply. With section
+      // selection a reply contains only the keys that were requested, so
+      // checking the reply alone flagged every other section as missing -
+      // including ones already generated and saved.
+      const _requestedNow = (activeSelection && activeSelection.length)
+        ? activeSelection
+        : INSIGHT_TOPICS.map((t) => t.key);
+      const gaps = _requestedNow.filter((k) => {
+        const v = _merged.sections[k];
+        if (v == null) return true;
+        if (typeof v === "string") return !v.trim();
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === "object") return Object.keys(v).length === 0;
+        return false;
+      });
       setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");

@@ -54,7 +54,7 @@ function BubbleDiagram({ zones }) {
 }
 
 export default function ConceptGenerator() {
-  const { provider, apiKey, meta } = useAppContext();
+  const { provider, apiKey, meta, grounding } = useAppContext();
   const [brief, setBrief] = useState("");
   // Live handle on the current render's closures for the rails bridge.
   const bridgeRef = useRef({});

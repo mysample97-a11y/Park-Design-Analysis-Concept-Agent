@@ -110,7 +110,9 @@ check("Resilience", "reading the retry hint does not consume the body",
 check("Resilience", "every provider error names its provider",
   /attributeError\("gemini"/.test(F.ai) && /attributeError\("claude"/.test(F.ai));
 check("Resilience", "the Gemini model default is pinned, not an alias",
-  /gemini: "gemini-2\.5-flash"/.test(F.settings));
+  // Value moved to gemini-3.6-flash when 3.5 was superseded (July 2026). The
+  // point of the check is that it is a PINNED id, never a *-latest alias.
+  /gemini: "gemini-[0-9.]+-flash"/.test(F.settings) && !/gemini: "gemini-[a-z-]*latest"/.test(F.settings));
 
 /* -------------------------------------------------------------- 4. CONTINUATION */
 {
@@ -158,7 +160,9 @@ check("Reports", "live-research extras are added INSIDE findings, not as new blo
 check("Reports", "conclusions are split into assessments and actions",
   /10\.1  ASSESSMENT AGAINST TARGETS/.test(F.report));
 {
-  const miss = everyTool((s) => /missingFields\(/.test(s) || /ONE AT A TIME/.test(s));
+  // The guard no longer calls missingFields on a reply; it compares the merged
+  // state against what was requested. Check for THAT, not the old call.
+  const miss = everyTool((s) => /_requestedNow/.test(s) || /ONE AT A TIME/.test(s));
   check("Reports", "every tool guards against dropped schema fields", miss.length === 0, miss.join(", "));
 }
 
@@ -486,6 +490,55 @@ check("Limits", "the rail names REQUESTS as the binding limit",
   /Requests are the limit here, not tokens/.test(F.rails));
 check("Limits", "the 429 message separates request and token budgets",
   /This is a REQUEST limit, not a token limit/.test(F.helpers));
+
+
+/* -------------------------------- 19. ERROR CLASSIFICATION
+ * A 503 was being reported as "Your API key has hit its usage limit" because the
+ * app's OWN 503 explanation contained the word "quota" and the quota branch
+ * matched it first. The Budget rail correctly showed 11 of 200 requests used, so
+ * the two directly contradicted each other and the message was the wrong one.
+ */
+check("Errors", "capacity is classified before quota",
+  F.helpers.indexOf("503|529") < F.helpers.indexOf("quota exceeded"));
+check("Errors", "classification uses status codes, not bare keywords",
+  /\\b\(503\|529\)\\b/.test(F.helpers) && /\\b429\\b/.test(F.helpers));
+check("Errors", "the 503 text no longer contains a word the classifier keys on",
+  !/not your key, your quota or your input/.test(F.ai));
+check("Errors", "the capacity message says the allowance is unaffected",
+  /your remaining allowance is unaffected/.test(F.helpers));
+check("Model", "the default Gemini model is the current free-tier one",
+  /gemini: "gemini-3\.6-flash"/.test(F.settings));
+check("Model", "superseded model ids are migrated, not just aliases",
+  /"gemini-3\.5-flash"/.test(F.settings) && /superseded/i.test(F.settings));
+
+
+/* ------------------------------------ 20. THIS ROUND'S FIXES */
+{
+  const expect = TOOLS.filter((t) => t !== "ConceptGenerator");
+  // The guard checked ONE REPLY. With section selection a reply legitimately
+  // holds only the requested keys, so every chunked run warned that the rest
+  // were missing - both uploaded logs showed all sections complete while the
+  // app claimed content was absent.
+  const a = expect.filter((t) => /missingFields\((parsed\w+),/.test(A[t]));
+  check("Guard", "no tool judges completeness from a single reply", a.length === 0, a.join(", "));
+  const b = expect.filter((t) => !/_requestedNow/.test(A[t]));
+  check("Guard", "completeness is judged against the merged state", b.length === 0, b.join(", "));
+}
+check("Grounding", "the insight call is not hardcoded to skip web search",
+  !/useWebSearch: false/.test(A.SolarAnalyzer));
+{
+  const miss = TOOLS.filter((t) => /useWebSearch/.test(A[t]) &&
+    !/const \{[^}]*grounding[^}]*\} = useAppContext/.test(A[t]));
+  check("Grounding", "tools read the grounding setting from context", miss.length === 0, miss.join(", "));
+}
+check("Sourcing", "hardcoded shade targets no longer name a foreign authority as the source",
+  !/source: "Delhi Urban Art Commission/.test(A.SolarAnalyzer));
+check("Sourcing", "reference entries are labelled as external benchmarks",
+  (F.report.match(/EXTERNAL benchmark - not the governing authority/g) || []).length >= 3);
+{
+  const bad = TOOLS.filter((t) => /media_type: (file|f)\.type/.test(A[t]));
+  check("Images", "no tool labels re-encoded bytes with the original file type", bad.length === 0, bad.join(", "));
+}
 
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];

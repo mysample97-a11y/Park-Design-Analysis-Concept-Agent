@@ -95,7 +95,7 @@ function buildDayData(month, day, lat, lon, utcOffset) {
 }
 
 export default function SolarAnalyzer() {
-  const { provider, apiKey, meta } = useAppContext();
+  const { provider, apiKey, meta, grounding } = useAppContext();
   const [location, setLocation] = useState("");
   // Live handle on the current render's closures for the rails bridge.
   const bridgeRef = useRef({});
@@ -430,7 +430,10 @@ export default function SolarAnalyzer() {
         gathering_areas: "80% shade",
         informal_play_and_parking: "40% shade",
         rest_areas: "one shaded rest area per 500 m of primary walkway",
-        source: "Delhi Urban Art Commission, Park Design Guidelines",
+        // Labelled for what it is: an external benchmark used because no local
+        // figure has been established. Naming a foreign body as the source made
+        // it read as governing at a Dubai site, which it is not.
+        source: "external benchmark - governing local requirement not established",
       },
       zones: named.map((z) => {
         const exposed = exposedHours(z);
@@ -459,7 +462,11 @@ export default function SolarAnalyzer() {
       const text = await callAI({
         onUsage: noteUsage,
       abortSignal: newAbort(),
-        provider, apiKey, maxTokens: 2500, useWebSearch: false,
+        provider, apiKey, maxTokens: 2500,
+        // Was hardcoded false, so turning grounding on in Settings changed the
+        // research step but never the analysis - and the report then correctly
+        // reported "training knowledge" because no sources came back.
+        useWebSearch: grounding === true,
         content: "You are a landscape architect interpreting computed solar geometry for a site. Use ONLY the computed data supplied - never invent temperature, UV or radiation figures. " +
           "Assess the site against the published shade coverage targets provided, and state where the site will fail them. " +
           "Comment on thermal comfort qualitatively, derived from sun angle and exposure duration only - explicitly note that no UTCI or radiant simulation was performed. " +
@@ -497,7 +504,19 @@ export default function SolarAnalyzer() {
       // "(not generated)" into those sections with nothing on screen to say
       // why. Keys are taken from THIS tool's own prompt so the check cannot
       // drift away from the contract it is checking.
-      const gaps = missingFields(parsedInsight, ["shade_strategy", "zone_recommendations", "conclusion"]);
+            // Judge the MERGED state against what was actually requested. Checking a
+      // single reply flagged sections that were already generated and saved.
+      const _requestedNow = (activeSelection && activeSelection.length)
+        ? activeSelection
+        : INSIGHT_TOPICS.map((t) => t.key);
+      const gaps = _requestedNow.filter((k) => {
+        const v = merged.sections[k];
+        if (v == null) return true;
+        if (typeof v === "string") return !v.trim();
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === "object") return Object.keys(v).length === 0;
+        return false;
+      });
       setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) { setInsightError(e.message || "Something went wrong. Try again."); }
     finally { endBusy(); setInsightLoading(false); }
@@ -558,12 +577,12 @@ export default function SolarAnalyzer() {
             ["Daylight duration", `${(dayData.length * 0.5).toFixed(1)} h`, "Sun above horizon"],
           ] },
         { title: "Daypart summary", headers: ["Daypart", "Window", "Peak elevation", "Dominant direction"], rows: dayparts() },
-        { title: "Shade coverage requirement", note: "Targets from published park design guidance (Delhi Urban Art Commission).",
+        { title: "Shade coverage requirement", note: "Indicative targets from published park design guidance. These are EXTERNAL benchmarks - the requirement that governs at this location has not been established and must be confirmed with the local authority.",
           items: ["Primary walkways (min 1.8 m wide): 80% continuous shade", "Secondary walkways: 60% shade", "Play structures: 100% shade coverage", "Gathering areas: 80% shade", "Informal play and surface parking: 40% shade", "One shaded rest area per 500 m of primary walkway"] },
         { title: "Shade geometry consequence", text: shadeGeometryNote() },
         ...(insight?.shade_strategy?.length ? [{
           title: "Shade strategy against published targets",
-          note: "Assessed against Delhi Urban Art Commission park design guidance.",
+          note: "Assessed against indicative external benchmarks, not against a verified local requirement.",
           headers: ["Element", "Coverage target", "What this site requires"],
           rows: insight.shade_strategy.map((r) => [r.element, r.target, r.implication]),
         }] : []),

@@ -62,7 +62,7 @@ const SITE_PROMPT =
   "For accessibility_standards: cite the standards that actually apply in the country/city given, never a default jurisdiction.";
 
 export default function SiteContextAnalyzer() {
-  const { provider, apiKey, meta } = useAppContext();
+  const { provider, apiKey, meta, grounding } = useAppContext();
   const [imageNotes, setImageNotes] = useState("");
   // Live handle on the current render's closures for the rails bridge.
   const bridgeRef = useRef({});
@@ -406,7 +406,21 @@ export default function SiteContextAnalyzer() {
       setInsight({ ...parsedInsight, ..._merged.sections });
       // Field guard: a run short of budget drops the TAIL fields of a schema and
       // the report then prints "(not generated)" with nothing on screen to say why.
-      const gaps = missingFields(parsedInsight, ["findings", "forward_constraints", "conclusion"]);
+      // Judge against the MERGED state, not this one reply. With section
+      // selection a reply contains only the keys that were requested, so
+      // checking the reply alone flagged every other section as missing -
+      // including ones already generated and saved.
+      const _requestedNow = (activeSelection && activeSelection.length)
+        ? activeSelection
+        : INSIGHT_TOPICS.map((t) => t.key);
+      const gaps = _requestedNow.filter((k) => {
+        const v = _merged.sections[k];
+        if (v == null) return true;
+        if (typeof v === "string") return !v.trim();
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === "object") return Object.keys(v).length === 0;
+        return false;
+      });
       setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");

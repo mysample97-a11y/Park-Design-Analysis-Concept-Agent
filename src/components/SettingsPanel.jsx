@@ -18,12 +18,25 @@ const STORAGE_KEYS = {
  * Known aliases are therefore rewritten on load. An explicitly chosen PINNED
  * model is never touched.
  */
-const ALIASES = ["gemini-flash-latest", "gemini-pro-latest", "gemini-latest", "gemini-1.5-flash-latest"];
+/*
+ * Aliases AND superseded model ids are migrated.
+ *
+ * "gemini-flash-latest" can resolve to preview capacity. Superseded ids are the
+ * other 503 source: a key still pointed at gemini-3.5-flash, which was replaced
+ * by 3.6 Flash on 21 July 2026, and an outgoing model gets whatever capacity is
+ * left over. Checked against Google's model list, August 2026 - re-check this
+ * when 503s recur, because Google rotates these without notice.
+ */
+const ALIASES = [
+  "gemini-flash-latest", "gemini-pro-latest", "gemini-latest", "gemini-1.5-flash-latest",
+  "gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite",   // retired
+  "gemini-3.5-flash", "gemini-3-flash-preview",                       // superseded by 3.6
+];
 function migrateGeminiModel(stored) {
   if (!stored) return "";
   if (!ALIASES.includes(stored.trim())) return stored;
-  try { localStorage.setItem("site_analysis_gemini_model", "gemini-2.5-flash"); } catch { /* ignore */ }
-  return "gemini-2.5-flash";
+  try { localStorage.setItem("site_analysis_gemini_model", "gemini-3.6-flash"); } catch { /* ignore */ }
+  return "gemini-3.6-flash";
 }
 
 const MODEL_KEYS = {
@@ -48,7 +61,7 @@ const DEFAULT_MODELS = {
   // PINNED, deliberately. "gemini-flash-latest" is an alias and can resolve to
   // preview capacity, which is the most common source of repeated HTTP 503
   // "model overloaded" failures. A pinned stable id is far more reliable.
-  gemini: "gemini-2.5-flash",
+  gemini: "gemini-3.6-flash",
 };
 
 export function useApiKeys() {

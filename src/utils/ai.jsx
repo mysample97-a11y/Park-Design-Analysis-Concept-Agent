@@ -300,12 +300,14 @@ export function attributeError(provider, message, model) {
 export function transientMessage(status) {
   if (status === 503 || status === 529) {
     return `The model has no spare capacity right now (HTTP ${status}). This is at the provider's ` +
-           "end - not your key, your quota or your input, and NOT something a continuation can fix: " +
+           "end - it is not your key and not your remaining allowance, and NOT something a " +
+           "continuation can fix: " +
            "the model refused before generating anything.\n\n" +
            "What actually helps:\n" +
            "1. Switch to a PINNED model in Settings. An alias such as 'gemini-flash-latest' can " +
-           "resolve to preview capacity, which is where most 503s come from. 'gemini-2.5-flash' is " +
-           "the stable choice.\n" +
+           "resolve to preview capacity, and a SUPERSEDED id gets whatever capacity is left " +
+           "over - both are common 503 sources. 'gemini-3.6-flash' is the current free-tier " +
+           "workhorse; 'gemini-3.5-flash' was replaced by it in July 2026.\n" +
            "2. Wait a minute or two. Retrying immediately spends a request without improving the odds - " +
            "every attempt counts against your per-minute limit.\n" +
            "3. Try a Claude key if you have one; the two providers do not share capacity.";

@@ -79,7 +79,30 @@ export function friendlyError(err) {
   if (!msg) return "An unknown error occurred. Please try again.";
   if (msg.includes("no api key") || msg.includes("key is missing")) return "Add an API key in Settings before using AI features.";
   if (msg.includes("failed to fetch") || msg.includes("networkerror")) return "Network error - check your internet connection, or the AI provider may be temporarily unreachable.";
-  if (msg.includes("429") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted") || msg.includes("exhausted")) {
+  /*
+   * ORDER MATTERS, AND SUBSTRING MATCHING IS FRAGILE.
+   *
+   * Capacity refusals are classified FIRST. The 503 explanation this app itself
+   * produces contains the phrase "not your key, your quota or your input" - and
+   * the quota branch below matches the bare word "quota". So a 503 was being
+   * relabelled "Your API key has hit its usage limit", directly contradicting a
+   * Budget rail that correctly showed 11 of 200 requests used. The display was
+   * right; this function was wrong.
+   *
+   * Explicit status codes are checked before any keyword, because a code is a
+   * fact and a keyword is a guess about prose.
+   */
+  if (/\b(503|529)\b/.test(msg) || msg.includes("overloaded") || msg.includes("no spare capacity")) {
+    return "The model has no spare capacity right now. This is the provider's own load, " +
+           "NOT your key and NOT your quota - your remaining allowance is unaffected and the " +
+           "Budget panel is showing it correctly. Wait a minute and press Continue; anything " +
+           "already generated is kept. If it persists, switch model or provider in Settings.";
+  }
+  if (/\b(401|403)\b/.test(msg) || msg.includes("key invalid") || msg.includes("api key error")) {
+    return "API key problem - the key was rejected. Check it is correct and still active in Settings.";
+  }
+  if (/\b429\b/.test(msg) || msg.includes("rate limit") || msg.includes("resource_exhausted") ||
+      msg.includes("quota exceeded") || msg.includes("exhausted")) {
     let out = "Your API key has hit its usage limit. ";
     try {
       if (localStorage.getItem("site_analysis_gemini_grounding") === "1") {

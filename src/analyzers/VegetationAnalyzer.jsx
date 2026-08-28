@@ -12,7 +12,7 @@ import {
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
-import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
+import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw, fileToImagePart } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, missingFields, missingFieldsNote } from "../utils/reportTemplate";
 import * as XLSX from "xlsx";
@@ -21,7 +21,7 @@ const MAX_IMAGES = 5;
 
 
 export default function VegetationAnalyzer() {
-  const { provider, apiKey, meta } = useAppContext();
+  const { provider, apiKey, meta, grounding } = useAppContext();
   const [location, setLocation] = useState("");
   // Live handle on the current render's closures for the rails bridge.
   const bridgeRef = useRef({});
@@ -270,8 +270,12 @@ export default function VegetationAnalyzer() {
     try {
       const contentBlocks = [];
       for (const file of files) {
-        const base64 = await fileToBase64Raw(file);
-        contentBlocks.push({ type: "image", source: { type: "base64", media_type: file.type || "image/png", data: base64 } });
+        // media_type MUST come from the encoder: fileToImagePart re-encodes to
+        // JPEG, so labelling the block with the ORIGINAL file.type sends JPEG
+        // bytes tagged image/png and the provider rejects them silently.
+        const part = await fileToImagePart(file);
+        if (!part || !part.base64) throw new Error(`"${file.name}" could not be read as an image.`);
+        contentBlocks.push({ type: "image", source: { type: "base64", media_type: part.mediaType, data: part.base64 } });
       }
       contentBlocks.push({ type: "text", text: "These are site-visit photos from a park redesign project. Describe what vegetation/trees/plants are visible across all photos - species if identifiable, apparent condition, approximate count per photo. Write this as plain field notes (a few sentences per photo), the way a landscape architect would jot down observations. Do not describe anything other than vegetation." });
       const text = await callAI({
@@ -365,7 +369,21 @@ export default function VegetationAnalyzer() {
       // "(not generated)" into those sections with nothing on screen to say
       // why. Keys are taken from THIS tool's own prompt so the check cannot
       // drift away from the contract it is checking.
-      const gaps = missingFields(parsedInsight, ["terrain_soil_note", "inventory_guidance", "suggested_species", "existing_value", "existing_vegetation", "conclusion"]);
+      // Judge against the MERGED state, not this one reply. With section
+      // selection a reply contains only the keys that were requested, so
+      // checking the reply alone flagged every other section as missing -
+      // including ones already generated and saved.
+      const _requestedNow = (activeSelection && activeSelection.length)
+        ? activeSelection
+        : INSIGHT_TOPICS.map((t) => t.key);
+      const gaps = _requestedNow.filter((k) => {
+        const v = _merged.sections[k];
+        if (v == null) return true;
+        if (typeof v === "string") return !v.trim();
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === "object") return Object.keys(v).length === 0;
+        return false;
+      });
       setInsightWarning(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setInsightError(e.message || "Something went wrong generating the insight. Try again.");

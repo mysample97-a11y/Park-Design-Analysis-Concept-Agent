@@ -14,7 +14,7 @@ import {
 import { getUsage, recordUsage, resetUsage, estimateRun, countTokensExact, getLimits } from "../utils/tokenMeter";
 import { setActiveTool, setActiveEstimate, setActivePartial, clearActiveTool, setActiveBusy, registerToolState, unregisterToolState, takePendingState } from "../utils/toolBridge";
 import { checklistPrompt } from "../utils/methodology";
-import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw } from "../utils/helpers";
+import { friendlyError, extractJSON, fileToBase64 , fileToBase64Raw, fileToImagePart } from "../utils/helpers";
 import ExportButtons from "../components/ExportButtons";
 import { exportStructuredWord, exportStructuredPDF, exportStructuredExcel, generateOverflow, nextDocRef, buildStructuredReport, tableHTML, barChartSVG, missingFields, missingFieldsNote} from "../utils/reportTemplate";
 
@@ -280,13 +280,18 @@ export default function SurveyAnalyzer() {
     if (!file) return;
     setImageLoading(true); setParseError("");
     try {
-      const base64 = await fileToBase64Raw(file);
+      const _part = await fileToImagePart(file);
+      if (!_part || !_part.base64) throw new Error("That image could not be read.");
+      const base64 = _part.base64;
       const text = await callAI({
         onUsage: noteUsage,
       abortSignal: newAbort(),
         provider, apiKey, maxTokens: 3500,
         content: [
-          { type: "image", source: { type: "base64", media_type: file.type || "image/png", data: base64 } },
+          // media_type from the ENCODER, not the original file: images are
+          // re-encoded to JPEG, so file.type mislabels the bytes and the
+          // provider rejects the block without saying why.
+          { type: "image", source: { type: "base64", media_type: _part.mediaType, data: _part.base64 } },
           { type: "text", text: "This image shows survey results. Extract it into clean CSV format: first row = question headers, each following row = one respondent's answers. Respond with ONLY the CSV text, no markdown code fences, no explanation." },
         ],
       });
@@ -373,7 +378,21 @@ export default function SurveyAnalyzer() {
       setAnalysis({ ...parsedAnalysis, ..._merged.sections });
       // Field-contract guard: say so plainly when the model omits expected keys,
       // rather than letting sections 8 and 10 print "(not generated)" silently.
-      const gaps = missingFields(parsedAnalysis, ["themes", "overall_summary", "conclusion"]);
+      // Survey's list named `themes` and `conclusion` - keys this tool's schema
+      // never asks for - so it reported them missing on EVERY run.
+      // Judge the MERGED state against what was actually requested. Checking a
+      // single reply flagged sections that were already generated and saved.
+      const _requestedNow = (activeSelection && activeSelection.length)
+        ? activeSelection
+        : INSIGHT_TOPICS.map((t) => t.key);
+      const gaps = _requestedNow.filter((k) => {
+        const v = _merged.sections[k];
+        if (v == null) return true;
+        if (typeof v === "string") return !v.trim();
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === "object") return Object.keys(v).length === 0;
+        return false;
+      });
       setAnalysisError(gaps.length ? missingFieldsNote(gaps) : "");
     } catch (e) {
       setAnalysisError(e.message || "Unknown error while generating insight.");
