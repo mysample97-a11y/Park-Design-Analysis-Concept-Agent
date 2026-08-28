@@ -497,7 +497,9 @@ export default function CombinedDocumentGenerator() {
         ? `The consolidated analysis identifies ${(result.matrix || []).length} cross-cutting themes across the supplied sections. ` +
           (result.design_implications || []).join(" ")
         : "",
-      conclusions: result ? (result.design_implications || []) : [],
+      conclusions: result
+        ? [...(result.design_implications || []), ...(result.concept_brief ? [result.concept_brief] : [])]
+        : [],
       runLimitations: SECTIONS.filter((sec) => !inputs[sec.id]).map((sec) => `Section not supplied: ${sec.label} - its findings are absent from this synthesis.`),
       extraRefs: webSources,
       // F3: report which research mode actually produced this run. Derived from

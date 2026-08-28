@@ -449,7 +449,10 @@ export default function VegetationAnalyzer() {
       chartsHtml: (PLANT_PALETTE.length ? tableHTML(["Species", "Type", "Water", "Shade", "Origin"],
           PLANT_PALETTE.map((p) => [p.name, p.type, p.water, p.shade, p.origin]), "Reference planting palette") : ""),
       interpretation: insight?.conclusion || "",
-      conclusions: (insight?.suggested_species || []).map((r) => typeof r === "string" ? r : `${r.name || r.species || ""}: ${r.reason || ""}`),
+      conclusions: [
+        ...(insight?.suggested_species || []).map((r) => typeof r === "string" ? r : `${r.name || r.species || ""}: ${r.reason || ""}`),
+        ...(insight?.conclusion ? [insight.conclusion] : []),
+      ],
       runLimitations: [],
       extraRefs: webSources,
       // F3: report which research mode actually produced this run. Derived from
@@ -524,6 +527,36 @@ export default function VegetationAnalyzer() {
             <ImageIcon size={15} /> {imageLoading ? "Reading photos..." : `Upload Site Photos (up to ${MAX_IMAGES})`}
             <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="sr-only" />
           </label>
+
+          {/*
+            photoNotes was fetched, stored and fed into later prompts, but never
+            rendered - so a successful read looked identical to a failure: the
+            button returned to its idle label and nothing appeared. The user has
+            no way to check what the model actually saw, or to correct it.
+          */}
+          {photoNotes && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#9BD1AE" }}>
+                  What the AI saw in your photos
+                </span>
+                <button type="button" data-plain onClick={() => setPhotoNotes("")}
+                  className="text-[11px] underline" style={{ color: "#8FA3BA" }}>
+                  Clear
+                </button>
+              </div>
+              <textarea
+                value={photoNotes}
+                onChange={(e) => setPhotoNotes(e.target.value)}
+                rows={6}
+                className="textarea"
+              />
+              <p className="text-[11px] mt-1" style={{ color: "#8FA3BA" }}>
+                Editable. These notes are added to the site context on every run that
+                follows, so correcting a misidentified species here fixes it everywhere.
+              </p>
+            </div>
+          )}
           <p className="text-[10px] text-brand-text/60">Photo upload may not work inside the Claude mobile app (a platform restriction). Try your phone's regular browser instead, or type/paste notes above.</p>
           {imageError && <p className="text-xs text-brand-danger flex items-center gap-1"><AlertTriangle size={12} /> {imageError}</p>}
 

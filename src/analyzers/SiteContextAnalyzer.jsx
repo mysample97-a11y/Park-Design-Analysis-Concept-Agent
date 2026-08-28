@@ -112,9 +112,22 @@ export default function SiteContextAnalyzer() {
     declares what remains; whatever arrives is merged and kept, so a budget that
     runs out mid-reply no longer discards the whole run. maxTokens is untouched.
   */
+  /*
+   * MUST MATCH THE TOP-LEVEL KEYS THIS TOOL'S PROMPT ASKS FOR.
+   *
+   * The previous list named `findings` and `forward_constraints`, which this
+   * prompt never requests, and omitted six keys the report DOES consume. Since
+   * the chunk instruction says "INCLUDE ONLY the keys listed under GENERATE
+   * NOW", those six were actively suppressed - the tool reported success while
+   * most of the report stayed empty.
+   */
   const INSIGHT_TOPICS = [
-    { key: "findings", label: "Key findings" },
-    { key: "forward_constraints", label: "Forward constraints" },
+    { key: "adjacencies", label: "Adjacencies by edge" },
+    { key: "accessibility_standards", label: "Accessibility standards" },
+    { key: "hazard_screening", label: "Hazard screening" },
+    { key: "quiet_and_active_zoning", label: "Quiet and active zoning" },
+    { key: "key_findings", label: "Key findings" },
+    { key: "constraints", label: "Forward constraints" },
     { key: "conclusion", label: "Conclusions and recommendations" },
   ];
   const [chunkState, setChunkState] = useState(() => loadPartial("SCX", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));

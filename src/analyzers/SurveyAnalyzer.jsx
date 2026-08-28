@@ -130,10 +130,26 @@ export default function SurveyAnalyzer() {
     merged and kept, and the next call continues from there - on a different
     API key if needed. maxTokens is untouched, so depth per section is unchanged.
   */
+  /*
+   * MUST MATCH THE SCHEMA IN THE PROMPT BELOW - all seven keys.
+   *
+   * This list had only three. The chunk instruction says "INCLUDE ONLY the keys
+   * listed under GENERATE NOW", so the four it omitted - themes,
+   * demographic_patterns, red_flags and conclusion - were actively suppressed.
+   * The tool then reported "all sections generated" because, by its own list,
+   * they were, while section 10 of the report stayed empty.
+   *
+   * The list was derived by an automated pass that read only the first few keys
+   * of the schema. If the prompt schema changes, change this too.
+   */
   const INSIGHT_TOPICS = [
+    { key: "themes", label: "Themes from the responses" },
     { key: "priority_ranking", label: "Priority ranking" },
-    { key: "conflicts", label: "Conflicts" },
+    { key: "demographic_patterns", label: "Demographic patterns" },
+    { key: "conflicts", label: "Conflicts between user groups" },
+    { key: "red_flags", label: "Data quality red flags" },
     { key: "overall_summary", label: "Overall summary" },
+    { key: "conclusion", label: "Conclusions and recommendations" },
   ];
   const [chunkState, setChunkState] = useState(() => loadPartial("SUR", INSIGHT_TOPICS) || emptyState(INSIGHT_TOPICS));
   const chunkProgress = progressLabel(chunkState, INSIGHT_TOPICS);
@@ -472,7 +488,13 @@ export default function SurveyAnalyzer() {
               analysis.conflicts.map((c) => [c.tension, c.resolution]), "Conflicting needs")
           : ""),
       interpretation: analysis?.overall_summary || "",
-      conclusions: [analysis?.conclusion].filter(Boolean),
+      /*
+       * This tool's schema has NO `conclusion` key - its closing section is
+       * `overall_summary`. Reading a key the model is never asked to produce
+       * meant section [10] was permanently empty, while the section list showed
+       * everything generated. Both were true; they were looking at different keys.
+       */
+      conclusions: [analysis?.overall_summary, analysis?.conclusion].filter(Boolean),
       runLimitations: [],
       extraRefs: [],
       // This tool does no live web research - it analyses the responses the user

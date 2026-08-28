@@ -1074,7 +1074,10 @@ export default function BudgetTracker() {
         + barChartSVG(wrapperRows.map((r) => ({ label: r.label, value: r.amount, display: formatNumber(r.amount), color: r.bold ? "#E8EFF7" : "#FF8A3D" })),
             { title: "Cost build-up" }),
       interpretation: insight?.conclusion || "",
-      conclusions: (insight?.observations || []),
+      conclusions: [
+        ...(insight?.observations || []),
+        ...(insight?.conclusion ? [insight.conclusion] : []),
+      ],
       runLimitations: [],
       extraRefs: webSources,
       // F3: report which research mode actually produced this run. Derived from

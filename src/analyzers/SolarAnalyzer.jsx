@@ -173,6 +173,9 @@ export default function SolarAnalyzer() {
     { key: "shade_strategy", label: "Shade strategy against published targets" },
     { key: "thermal_comfort_note", label: "Thermal comfort (derived)" },
     { key: "zone_recommendations", label: "Per-zone recommendations" },
+    // Was missing, so the PV section of the report was suppressed even though
+    // the prompt asks for it and the report renders it.
+    { key: "energy_potential", label: "Photovoltaic / energy potential" },
     { key: "conclusion", label: "Conclusions and recommendations" },
   ];
   // F27 - EXACT token count on demand.

@@ -467,7 +467,11 @@ export default function WindAnalyzer() {
         tableHTML(["Season", "Prevailing", "Speed", "Dust risk", "Character"],
           SEASONS.map((s) => [s.label, s.prevailing, s.speedRange, s.dustRisk, s.character]), "Seasonal wind reference"),
       interpretation: insight?.conclusion || "",
-      conclusions: (insight?.zone_recommendations || []).map((r)=>`${r.zone}: ${r.recommendation}`),
+      conclusions: [
+        ...(insight?.zone_recommendations || []).map((r) => `${r.zone}: ${r.recommendation}`),
+        // The generated conclusion belongs here; it was being dropped.
+        ...(insight?.conclusion ? [insight.conclusion] : []),
+      ],
       runLimitations: [],
       extraRefs: webSources,
       // F3: report which research mode actually produced this run. Derived from
