@@ -1446,7 +1446,8 @@ export default function BudgetTracker() {
             {insightLoading || comparing
               ? <span className="inline-block w-[15px] h-[15px] border-2 border-white/30 border-t-white rounded-full animate-spin" />
               : <Sparkles size={15} />}
-            {insightLoading || comparing ? "Working - do not navigate away" : "Generate AI Insight"}
+            {insightLoading || comparing ? "Working - do not navigate away"
+              : chunkState.done.length === 0 ? "Generate AI Insight" : "Start over (regenerate all)"}
           </button>
           {busy && (
             <button type="button" onClick={cancelRequest} className="btn-gold ml-2">

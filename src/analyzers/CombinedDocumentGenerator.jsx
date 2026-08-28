@@ -612,7 +612,8 @@ export default function CombinedDocumentGenerator() {
 
           />
 
-          <button onClick={startFreshInsight} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..." : "Generate Consolidated Report"}</button>
+          <button onClick={startFreshInsight} disabled={loading || !apiKey} className="btn-gold w-full"><Sparkles size={18} /> {loading ? "Consolidating..."
+            : chunkState.done.length === 0 ? "Generate Consolidated Report" : "Start over (regenerate all)"}</button>
           {busy && (
             <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
               Cancel

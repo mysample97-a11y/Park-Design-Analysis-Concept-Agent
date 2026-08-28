@@ -86,7 +86,10 @@ export function friendlyError(err) {
         out += "You have Gemini live web search switched on in Settings - on a free Gemini key that is charged against a very small daily allowance (roughly 20 requests) and is the most likely cause. Turn it off in Settings and try again. ";
       }
     } catch { /* ignore */ }
-    out += "Otherwise: free tiers reset on a rolling window, so wait a minute and retry, or use a key " +
+    out += "This is a REQUEST limit, not a token limit - the two are separate budgets. A free key is " +
+           "refused after roughly 20 requests in a minute however few tokens those requests used, so " +
+           "seeing only a few thousand tokens spent in the panel is expected and is not a miscount. " +
+           "Otherwise: free tiers reset on a rolling window, so wait a minute and retry, or use a key " +
            "with remaining quota. Free-tier request limits are PER MODEL and Google changes them without " +
            "notice - read the exact ceiling from the error text above (it names the metric and the limit) " +
            "and set it in the Budget rail so the meter warns you next time.";

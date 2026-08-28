@@ -598,7 +598,7 @@ export default function WindAnalyzer() {
               freeTier={(getLimits(provider) || {}).tier !== "paid"}
             />
             <button onClick={startFreshInsight} disabled={insightLoading || zones.filter((z) => z.name.trim()).length === 0 || !apiKey} className="btn-dark">
-              <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
+              <Sparkles size={15} /> {insightLoading ? "Analyzing..." : (chunkState.done.length === 0 ? "Generate AI Insight" : "Start over (regenerate all)")}
             </button>
             {busy && (
               <button type="button" onClick={cancelRequest} className="btn-gold ml-2">

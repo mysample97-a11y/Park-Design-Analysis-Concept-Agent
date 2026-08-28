@@ -189,6 +189,20 @@ export function BudgetRail({ provider = "claude", estimate = null, onCalculate =
         <div style={{ fontSize: 10.5, color: LEVEL_FG[cap.level] || "#8FA3BA", marginTop: 7 }}>
           {cap.message}
         </div>
+
+        {/* WHICH limit binds. Tokens are the prominent number, so a refusal reads
+            as a contradiction: "only a few thousand tokens used, how am I over?"
+            They are two separate budgets and the panel never said so. */}
+        <div style={{ marginTop: 7, padding: "6px 8px", borderRadius: 6,
+          background: "#0E1520", border: "1px solid #22304A", fontSize: 10,
+          color: "#8FA3BA", lineHeight: 1.45 }}>
+          <strong style={{ color: "#FFC79A" }}>Requests are the limit here, not tokens.</strong>{" "}
+          {lim.rpm ? `${lim.rpm} per minute` : "A per-minute cap"}
+          {lim.rpd ? ` and ${lim.rpd} per day` : ""} — you are refused on request count
+          long before the {lim.tpm ? formatTokens(lim.tpm) : ""} token/minute allowance
+          runs out. "Quota exceeded" with only a few thousand tokens spent is normal,
+          not a miscount.
+        </div>
       </div>
 
       <div style={{ marginTop: 11, paddingTop: 9, borderTop: "1px solid #3A5878" }}>

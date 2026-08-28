@@ -754,7 +754,7 @@ export default function SiteContextAnalyzer() {
               freeTier={(getLimits(provider) || {}).tier !== "paid"}
             />
             <button onClick={startFreshInsight} disabled={insightLoading} title={chunkState.done.length && !insightComplete ? "Continue generating the remaining sections" : undefined} style={BTN_DARK} className="text-sm font-bold px-4 py-2.5 rounded-md flex items-center gap-2 disabled:opacity-40 shadow-md">
-              <Sparkles size={15} /> {insightLoading ? "Analyzing..." : "Generate AI Insight"}
+              <Sparkles size={15} /> {insightLoading ? "Analyzing..." : (chunkState.done.length === 0 ? "Generate AI Insight" : "Start over (regenerate all)")}
             </button>
             {busy && (
               <button type="button" onClick={cancelRequest} className="btn-gold ml-2">

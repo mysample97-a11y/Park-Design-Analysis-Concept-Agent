@@ -468,6 +468,25 @@ check("Selection", "the selector explains the free-tier strategy",
 check("Cancel", "counting cannot compete with a run in flight",
   /disabled=\{calculating \|\| busy\}/.test(F.rails));
 
+
+/* ------------------------------ 18. ONE CONTINUE BUTTON, CLEAR LIMITS */
+{
+  const expect = TOOLS.filter((t) => t !== "ConceptGenerator");
+  // Two implementations once overlapped: the main button relabelled itself to
+  // "Continue insight generation" AND a separate Continue button existed, so
+  // both rendered.
+  const dupes = expect.filter((t) => (A[t].match(/Continue insight/g) || []).length > 1);
+  check("Buttons", "exactly one Continue control per tool", dupes.length === 0, dupes.join(", "));
+  const relabel = expect.filter((t) => /"Continue insight generation"/.test(A[t]));
+  check("Buttons", "Generate never relabels itself as Continue", relabel.length === 0, relabel.join(", "));
+  const fresh = expect.filter((t) => !/"Start over \(regenerate all\)"/.test(A[t]));
+  check("Buttons", "Generate says plainly that it starts over", fresh.length === 0, fresh.join(", "));
+}
+check("Limits", "the rail names REQUESTS as the binding limit",
+  /Requests are the limit here, not tokens/.test(F.rails));
+check("Limits", "the 429 message separates request and token budgets",
+  /This is a REQUEST limit, not a token limit/.test(F.helpers));
+
 /* --------------------------------------------------------------------- OUTPUT */
 const groups = [...new Set(results.map((r) => r.group))];
 for (const g of groups) {

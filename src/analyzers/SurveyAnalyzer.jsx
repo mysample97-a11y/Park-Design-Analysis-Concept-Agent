@@ -542,9 +542,7 @@ export default function SurveyAnalyzer() {
               freeTier={(getLimits(provider) || {}).tier !== "paid"}
             />
             <button onClick={startFreshInsight} disabled={analysisLoading || !apiKey} className="btn-dark">
-              {chunkState.done.length === 0 ? "Generate AI Insight"
-                : insightComplete ? "Regenerate AI Insight"
-                : "Continue insight generation"}
+              {chunkState.done.length === 0 ? "Generate AI Insight" : "Start over (regenerate all)"}
             </button>
             {busy && (
               <button type="button" onClick={cancelRequest} className="btn-gold ml-2">
